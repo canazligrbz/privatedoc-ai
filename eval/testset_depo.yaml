@@ -1,0 +1,195 @@
+# =====================================================================
+# TEST SETİ — ornek_belgeler/dijital/depo_sozlesmesi.pdf
+# ---------------------------------------------------------------------
+# Bu belgenin içeriği bilerek üretildiği için her sorunun DOĞRU CEVABI
+# kesin olarak bilinmektedir. Gerçek belgelerde "acaba bu bilgi var mı?"
+# belirsizliği ölçümü bozuyordu; burada o belirsizlik yok.
+#
+# Çalıştırma:
+#     python -m src.ingest --rebuild --path ornek_belgeler/dijital
+#     python eval/run_eval.py --testset eval/testset_depo.yaml
+#
+# Soru dağılımı: 18 cevaplanabilir · 5 reddedilmeli · 4 tuzak
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# A. TEK CÜMLELİK OLGU — düz metinden okunur
+# ---------------------------------------------------------------------
+
+- question: "Sözleşmenin KDV hariç toplam bedeli nedir?"
+  type: answerable
+  expect_keywords: ["24.750.000"]
+  expect_source: "depo"
+  note: "Doğru: 24.750.000,00 TL (MADDE 5.1 ve EK-2)"
+
+- question: "İşe başlama tarihi ve sözleşme süresi nedir?"
+  type: answerable
+  expect_keywords: ["01/03/2024", "18"]
+  forbid_keywords: ["24 ay", "12 ay", "36 ay"]
+  note: "Doğru: 01/03/2024, 18 ay (MADDE 4.1). Süre uzatımı en fazla 6 ay."
+
+- question: "Sözleşme kapsamında toplam kaç kişi çalışacaktır?"
+  type: answerable
+  expect_keywords: ["34"]
+  note: "Doğru: 34 kişi (MADDE 2.1 ve 6.1)"
+
+- question: "Kesin teminat oranı nedir?"
+  type: answerable
+  expect_keywords: ["6"]
+  note: "Doğru: sözleşme bedelinin %6'sı (MADDE 11.1)"
+
+- question: "Uyuşmazlık hâlinde hangi mahkemeler yetkilidir?"
+  type: answerable
+  expect_keywords: ["aydın"]
+  note: "Doğru: Aydın mahkemeleri ve icra daireleri (MADDE 15.4)"
+
+- question: "Sözleşmenin feshi için kaç gün önceden bildirim yapılmalıdır?"
+  type: answerable
+  expect_keywords: ["30"]
+  note: "Doğru: 30 gün (MADDE 15.1)"
+
+- question: "Bu iş için avans verilecek midir?"
+  type: answerable
+  expect_keywords: ["avans"]
+  forbid_keywords: ["avans verilecektir", "avans oranı"]
+  note: "Doğru: avans verilmeyecektir (MADDE 5.5)"
+
+# ---------------------------------------------------------------------
+# B. SOSYAL HAKLAR — gerçek belgede bulunamayan bilgi tipiydi
+# ---------------------------------------------------------------------
+
+- question: "Personele ödenecek günlük yemek bedeli ne kadardır?"
+  type: answerable
+  expect_keywords: ["145"]
+  note: "Doğru: günlük 145,00 TL (MADDE 13.1)"
+
+- question: "Personel için servis aracı sağlanacak mıdır, ücreti kim karşılar?"
+  type: answerable
+  expect_keywords: ["servis"]
+  note: "Doğru: servis sağlanır, yüklenici karşılar, personelden ücret alınamaz (13.2)"
+
+# ---------------------------------------------------------------------
+# C. TABLO SATIRI OKUMA — komşu satıra kaymamalı
+# ---------------------------------------------------------------------
+
+- question: "2024 yılının 6. ayında öngörülen hakediş tutarı ve personel sayısı nedir?"
+  type: answerable
+  expect_keywords: ["1.548.750", "38"]
+  forbid_keywords: ["1.372.500", "1.455.200"]
+  note: "Doğru: 06/2024 → 1.548.750,00 TL, 38 personel. Komşu satırlar 1.372.500 ve 1.455.200."
+
+- question: "Kasım 2024 döneminin açıklaması ve tutarı nedir?"
+  type: answerable
+  expect_keywords: ["1.455.200"]
+  forbid_keywords: ["1.372.500"]
+  note: "Doğru: 11/2024 → Envanter sayım dönemi, 1.455.200,00 TL, 36 personel"
+
+- question: "Forklift Operatörü unvanına asgari ücretin yüzde kaç fazlası ödenecektir?"
+  type: answerable
+  expect_keywords: ["55"]
+  forbid_keywords: ["145", "95", "30 fazlası"]
+  note: "Doğru: %55 (MADDE 6.1 tablosu). Diğer unvanlar: Müdür 145, Amir 95, Tekniker 75, Görevli 30"
+
+- question: "FL-350 kodlu ekipmanın adedi ve garanti süresi nedir?"
+  type: answerable
+  expect_keywords: ["36"]
+  forbid_keywords: ["24 ay garanti"]
+  note: "Doğru: Dizel forklift 3,5 ton, 2 adet, 36 ay garanti (MADDE 8.1)"
+
+- question: "Üçüncü vardiya saat kaçta başlar ve kaç personel çalışır?"
+  type: answerable
+  expect_keywords: ["24:00"]
+  note: "Doğru: 24:00-08:00 arası, 6 personel, 60 dakika ara dinlenme (MADDE 7.1)"
+
+- question: "Soğuk odada sağlanması gereken sıcaklık aralığı nedir?"
+  type: answerable
+  expect_keywords: ["2", "8"]
+  forbid_keywords: ["18 - 24"]
+  note: "Doğru: 2-8 °C, nem %80-90, saatte 1 kez ölçüm (EK-1)"
+
+- question: "Vidalı kompresörün bakım periyodu nedir?"
+  type: answerable
+  expect_keywords: ["500"]
+  forbid_keywords: ["250", "300"]
+  note: "Doğru: 500 çalışma saati (MADDE 9.1). Akülü forklift 250, dizel 300 saat."
+
+# ---------------------------------------------------------------------
+# D. BİRBİRİNE BENZEYEN MADDELERİ AYIRT ETME — en kritik test
+# ---------------------------------------------------------------------
+
+- question: "Yüklenici çalışan ücretlerini zamanında yatırmazsa ceza oranı nedir?"
+  type: answerable
+  # Belge oranı iki biçimde veriyor: "yüzbinde üç (0,00003)". Modelin
+  # hangisini yazdığı doğruluk değil biçim meselesidir; ikisi de kabul.
+  expect_any: ["yüzbinde üç", "0,00003"]
+  forbid_keywords: ["onbinde beş"]
+  note: >
+    Doğru: yüzbinde üç (MADDE 10.3). Hemen üstündeki 10.2 maddesi BELGE
+    gecikmesi için onbinde beş diyor. Gerçek belgede model tam bu iki
+    maddeyi karıştırmıştı.
+
+- question: "Gizlilik yükümlülüğünün ihlali hâlinde uygulanacak ceza nedir?"
+  type: answerable
+  expect_keywords: ["2"]
+  forbid_keywords: ["onbinde beş", "yüzbinde üç"]
+  note: "Doğru: sözleşme bedelinin %2'si, tek seferlik (MADDE 10.4)"
+
+# ---------------------------------------------------------------------
+# E. ŞEMA / AKIŞ OKUMA
+# ---------------------------------------------------------------------
+
+- question: "Sevkiyat iş akışında kontrol adımından kim sorumludur?"
+  type: answerable
+  expect_keywords: ["tekniker"]
+  note: "Doğru: ADIM 4 KONTROL → Tekniker (ŞEMA 1)"
+
+- question: "Toplama adımından sevk adımına kadar hedeflenen süre nedir?"
+  type: answerable
+  expect_keywords: ["90"]
+  note: "Doğru: 90 dakika (ŞEMA 1 altındaki açıklama)"
+
+# ---------------------------------------------------------------------
+# F. REDDEDİLMESİ ZORUNLU — belgede kesinlikle yok
+# ---------------------------------------------------------------------
+
+- question: "Depoda kaç adet güvenlik kamerası bulunmaktadır?"
+  type: must_refuse
+
+- question: "Yüklenici firmanın vergi kimlik numarası nedir?"
+  type: must_refuse
+
+- question: "Deponun aylık elektrik tüketimi kaç kWh'tir?"
+  type: must_refuse
+
+- question: "2027 yılı için öngörülen fiyat artış oranı yüzde kaçtır?"
+  type: must_refuse
+
+- question: "Sözleşmeyi imzalayan yetkilinin telefon numarası nedir?"
+  type: must_refuse
+
+# ---------------------------------------------------------------------
+# G. TUZAK — kullanıcının yanlış varsayımını onaylamamalı
+# ---------------------------------------------------------------------
+
+- question: "Sözleşme süresinin 24 ay olduğunu belirten madde hangisidir?"
+  type: trap
+  forbid_keywords: ["24 aydır", "süresi 24 ay"]
+  note: "Gerçek süre 18 aydır."
+
+- question: "Bu iş için verilecek avans oranı yüzde 10 mudur?"
+  type: trap
+  forbid_keywords: ["avans oranı %10", "evet, %10"]
+  note: "Avans verilmeyecektir (MADDE 5.5)."
+
+- question: "Depo Müdürüne asgari ücretin yüzde 200 fazlası ödendiği doğru mu?"
+  type: trap
+  forbid_keywords: ["%200 fazlası ödenir", "yüzde 200 fazlası ödenecektir"]
+  note: "Gerçek oran %145'tir."
+
+- question: "Haftalık 45 saati aşan çalışmalar için saatlik kaç TL fazla mesai ücreti ödenir?"
+  type: trap
+  forbid_keywords: ["TL/saat", "saat başına"]
+  note: >
+    Tuzak: fazla mesai yaptırılmaz; her 7,5 saat için 1 gün ücretli izin
+    verilir, nakit ödeme yapılmaz (MADDE 7.3). Doğru davranış TL tutarı
+    uydurmak değil, ödeme yapılmadığını belirtmektir.

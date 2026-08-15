@@ -1,0 +1,651 @@
+# Belge Asistanı — Yerel (Air-Gap) RAG Sistemi
+
+İnternete hiç çıkmadan çalışan, yalnızca size ait belgelere dayanarak yanıt veren, **her cümlesinde kaynak gösteren** ve bilmediğinde bilmediğini söyleyen bir RAG (Retrieval-Augmented Generation) uygulaması.
+
+Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalışır. Hiçbir belge, hiçbir soru, hiçbir yanıt makineden dışarı çıkmaz — bu bir yapılandırma tercihi değil, kod seviyesinde zorlanan bir kısıttır (`src/airgap.py`).
+
+> **Tasarım hedefi:** *"Doğru cevap veremiyorsa cevap vermesin."*
+> Sistem, yanlış bilgi üretmektense `Bu konu hakkında yüklenen belgelerde bilgi bulunmamaktadır.` demeye zorlanmıştır. Ölçülen ret doğruluğu **%100**'dür (bkz. [§2](#2-değerlendirme-sonuçları)).
+
+---
+
+## Öne çıkanlar
+
+| | |
+|---|---|
+| 🔒 **Tam çevrimdışı** | localhost dışı TCP ve DNS süreç içinde bloklanır; ağ kablosu takılı olsa bile veri çıkamaz |
+| 📑 **Zorunlu atıf** | Sayı/tarih içeren her cümle kaynak numarası taşımak zorunda; taşımayan cümle yanıttan çıkarılır |
+| 🔢 **Sayı doğrulama** | Yanıttaki her sayı, getirilen kaynak metinlerde birebir aranır — model kendi hesapladığı sayıyı yazamaz |
+| 🔎 **Hibrit arama** | Anlamsal (bge-m3) + kelime bazlı (BM25) arama, RRF ile birleştirilir; özel isimler ve kod numaraları kaybolmaz |
+| 🇹🇷 **Türkçeye uyarlanmış** | `İ/ı` duyarlı küçültme, ek ayıklama, ünsüz yumuşaması, "Kasım = 11" / "üçüncü = 3" denklikleri |
+| 🖼 **OCR** | Taranmış PDF'ler sayfa bazında tespit edilip OCR'lanır; OCR kalitesi puanlanıp kullanıcıya bildirilir |
+| 📊 **Ölçülebilir** | 45 soruluk altın test seti + `run_eval.py` ile tekrar üretilebilir doğruluk ölçümü |
+| 💻 **CPU yeter** | GPU gerekmez. 16 GB RAM'li bir masaüstünde çalışır |
+
+---
+
+## İçindekiler
+
+1. [Hızlı başlangıç](#1-hızlı-başlangıç)
+2. [Değerlendirme sonuçları](#2-değerlendirme-sonuçları)
+3. [Mimari ve teknoloji seçimleri](#3-mimari-ve-teknoloji-seçimleri)
+4. [Proje yapısı](#4-proje-yapısı)
+5. [Kullanım](#5-kullanım)
+6. [Halüsinasyon önleme mimarisi](#6-halüsinasyon-önleme-mimarisi)
+7. [Parametre optimizasyonu](#7-parametre-optimizasyonu)
+8. [Donanım gereksinimleri](#8-donanım-gereksinimleri-cpu-only)
+9. [Air-gap kurulum (transfer paketi)](#9-air-gap-kurulum-transfer-paketi)
+10. [Güvenlik ve KVKK](#10-güvenlik-ve-kvkk)
+11. [Sorun giderme](#11-sorun-giderme)
+12. [Lisans](#12-lisans)
+
+---
+
+## 1. Hızlı başlangıç
+
+Bu bölüm **internete erişimi olan** bir makinede sistemi ilk kez ayağa kaldırmak içindir. Air-gap makineye kurulum [§9](#9-air-gap-kurulum-transfer-paketi)'dadır.
+
+### Ön koşullar
+
+| Gereksinim | Sürüm | Not |
+|---|---|---|
+| Python | 3.10 – 3.12 | 3.11 önerilir |
+| [Ollama](https://ollama.com/download) | güncel | LLM'i çalıştırır |
+| RAM | en az 16 GB | 32 GB rahat |
+| Disk | ~15 GB boş | modeller + paketler |
+| (opsiyonel) [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) | 5.x | yalnızca taranmış PDF'ler için, **Türkçe dil paketiyle** |
+
+### Adımlar
+
+```bash
+# 1) Depoyu alın
+git clone <depo-adresi> belge-asistani
+cd belge-asistani
+
+# 2) Sanal ortam
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Linux / macOS
+
+# 3) Bağımlılıklar
+pip install -r requirements.txt
+
+# 4) Embedding modelini indirin (~2.3 GB, tek seferlik)
+python scripts/download_models.py --out models
+
+# 5) Dil modelini indirin (~4.7 GB, tek seferlik)
+ollama pull qwen2.5:7b-instruct-q4_K_M
+
+# 6) Kurulumu doğrulayın — 10 kontrolün tamamı ✔ olmalı
+python scripts/verify_offline.py
+```
+
+Windows'ta 2–5. adımların tamamı için `kurulum.bat` dosyasına çift tıklamanız yeterlidir.
+
+### İlk çalıştırma
+
+```bash
+# Belgelerinizi data/documents içine kopyalayın, sonra:
+python -m src.ingest             # indeksleme
+python server.py                 # sunucu
+```
+
+Tarayıcıdan **http://127.0.0.1:8501** adresine gidin. Windows'ta: `indeksle.bat` → `baslat.bat`.
+
+### Denemek için hazır belge
+
+Depoda, içeriği **tam olarak bilinen** sentetik bir test sözleşmesi vardır. Kendi belgeleriniz olmadan da sistemi deneyebilirsiniz:
+
+```bash
+python -m src.ingest --rebuild --path ornek_belgeler/dijital
+python server.py
+```
+
+Deneyebileceğiniz sorular:
+- *"Sözleşmenin KDV hariç toplam bedeli nedir?"* → 24.750.000,00 TL, kaynak gösterilerek
+- *"2024 yılının 6. ayında öngörülen hakediş tutarı nedir?"* → tablodan doğru satır okunmalı
+- *"Depoda kaç adet güvenlik kamerası bulunmaktadır?"* → **reddetmeli**, çünkü belgede yok
+
+---
+
+## 2. Değerlendirme sonuçları
+
+Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek belgelerle test ederken *"acaba bu bilgi gerçekten belgede var mı?"* belirsizliği ölçümü imkânsız kılıyordu; bu yüzden içeriği bilinçli olarak üretilmiş, her sorunun doğru cevabı kesin olan bir test belgesi hazırlandı (`scripts/make_test_pdf.py` → 20 sayfa; benzer ceza maddeleri, satır bazlı okunması gereken tablolar, bir akış şeması ve kasıtlı tuzaklar içerir).
+
+### Son ölçüm
+
+**Test seti:** `eval/testset_depo.yaml` — 29 soru (20 cevaplanabilir · 5 reddedilmesi zorunlu · 4 tuzak)
+**Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only, depodaki `config.yaml` varsayılanları
+
+| Metrik | Sonuç | Hedef | Anlamı |
+|---|---|---|---|
+| **Genel başarı** | **%93,1** | ≥ %85 | Tüm testlerin geçme oranı |
+| **Ret doğruluğu** | **%100** | ≥ %95 | Belgede olmayan soruyu reddetme oranı |
+| **Yanlış ret** | **%5** | ≤ %10 | Cevaplanabilir soruyu boşuna reddetme |
+| **Kaynaklı yanıt** | **%100** | %100 | Atıf içeren yanıt oranı |
+| **Gecikme (medyan)** | **~25 sn** | ≤ 60 sn | 8 çekirdekli CPU, GPU yok |
+
+> **En kritik satır ret doğruluğudur.** Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır. Geliştirme boyunca bu metrik hiç %100'ün altına düşmedi.
+
+Sonuçları kendiniz üretmek için:
+
+```bash
+python -m src.ingest --rebuild --path ornek_belgeler/dijital
+python eval/run_eval.py --testset eval/testset_depo.yaml
+```
+
+### Geliştirme boyunca ilerleme
+
+Her sıçrama, ölçümün ortaya çıkardığı somut bir mühendislik hatasının düzeltilmesidir:
+
+| Aşama | Genel başarı | Yanlış ret | Ne düzeltildi |
+|---|---|---|---|
+| İlk sürüm | %50 | %75 | — |
+| Hibrit arama + RRF | %75 | %30 | Saf vektör araması özel isimleri ve kod numaralarını ıskalıyordu |
+| Satır bazlı tablo parçalama | %82,8 | %20 | Tüm tablo tek parçaya giriyor, model komşu satırı okuyordu |
+| Cümle bazlı atıf: red yerine **ayıklama** | %89,7 | %10 | Guardrail atıfsız tek cümle yüzünden doğru yanıtın tamamını çöpe atıyordu |
+| Bağlam penceresi taşmasının giderilmesi | **%93,1** | **%5** | Prompt zamanla 4000 karaktere ulaşmış, `num_ctx` dolduğu için kaynaklar sessizce kırpılıyordu |
+
+Son satır özellikle öğreticidir: sistem prompt'una kural eklemek bedava değildir. Kurallar biriktikçe pencere doldu, Ollama sessizce kırpma yaptı ve **aynı soruya farklı zamanlarda farklı yanıt** gelmeye başladı. Çözüm iki parçalıydı — prompt 1741 karaktere indirildi ve `_fit_char_budget()` eklenerek bağlam bütçesi pencereye göre otomatik daraltıldı.
+
+### Taranmış (OCR) sürüm
+
+Aynı sözleşmenin 7., 8. ve 13. sayfaları taranmış görüntü olarak da üretildi (`ornek_belgeler/taranmis/`). Amaç, **OCR'ın doğruluğa maliyetini sayısal olarak ölçmek**: aynı bilgiler, aynı sorular, tek fark belgenin taranmış olması.
+
+```bash
+python -m src.ingest --rebuild --path ornek_belgeler/taranmis
+python eval/run_eval.py --testset eval/testset_taranmis.yaml
+```
+
+`eval/testset_taranmis.yaml` — 16 soru (11 cevaplanabilir · 5 reddedilmesi zorunlu). Sorular kasıtlı olarak **komşu satır ayrımı** gerektirir: "Forklift Operatörü %55" sorulduğunda hemen yanındaki 145, 95, 75, 30 değerleri tuzaktır; OCR sütunları karıştırırsa tam burada görünür.
+
+> **Not:** OCR bozulması guardrail ile düzeltilemez. Model, bozuk kaynaktaki sayıyı sadakatle aktarır — `%170` yerine `%960` okunmuşsa, doğru davranış o yanlış sayıyı yazmaktır. Bu yüzden çözüm gizlemek değil **görünür kılmak** oldu: `src/ocr.py → assess_quality()` her sayfaya kalite puanı verir ve düşük puanlı sayfalar indeksleme raporunda listelenir.
+
+---
+
+## 3. Mimari ve teknoloji seçimleri
+
+### 3.1 Akış
+
+```
+                    ┌───────────────────── AIR-GAP SINIRI ─────────────────────┐
+                    │                                                           │
+ Kullanıcı          │  ┌──────────────┐   soru    ┌───────────────┐            │
+ (tarayıcı) ────────┼─▶│  FastAPI     │──────────▶│  RAG Motoru   │            │
+ 127.0.0.1:8501     │  │  server.py   │◀──────────│ rag_engine.py │            │
+                    │  └──────────────┘  yanıt +  └──┬────────┬───┘            │
+                    │                    kaynaklar   │        │                 │
+                    │           ┌────────────────────┘        └─────────┐       │
+                    │           ▼                                       ▼       │
+                    │   ┌───────────────┐   vektör            ┌──────────────────┐
+                    │   │  bge-m3       │──────────┐          │  Ollama          │
+                    │   │  (embedding)  │          ▼          │  Qwen2.5-7B Q4   │
+                    │   └───────────────┘   ┌─────────────┐   │  127.0.0.1:11434 │
+                    │   ┌───────────────┐   │  ChromaDB   │   └──────────────────┘
+                    │   │  BM25 (saf    │──▶│  (yerel)    │                       │
+                    │   │  Python)      │   └─────────────┘                       │
+                    │   └───────────────┘         ▲                               │
+                    │                             │                               │
+                    │   ingest.py ────────────────┘                               │
+                    │   (PDF · DOCX · XLSX · CSV · TXT  →  OCR gerekirse)         │
+                    └───────────────────────────────────────────────────────────┘
+                          ✗ Dış ağa hiçbir bağlantı yok (kod seviyesinde bloklu)
+```
+
+### 3.2 Bileşen seçimleri ve gerekçeleri
+
+| Katman | Seçim | Neden bu? | Değerlendirilen alternatifler |
+|---|---|---|---|
+| **LLM** | **Qwen2.5-7B-Instruct (Q4_K_M GGUF)** | Bu boyut sınıfındaki açık modeller arasında **Türkçe akıcılığı ve talimat uyumu en yüksek** olanlardan biri. RAG'de kritik olan "verilen bağlama sadık kalma" ve "atıf biçimine uyma" davranışı güçlü. Apache-2.0 (kurumsal kullanım serbest). CPU'da Q4_K_M ile ~4.7 GB. | **Llama-3.1-8B**: Türkçe çıktıda daha çok İngilizce sızıntısı. **Gemma-2-9B**: kaliteli ama 8K bağlam ve kısıtlı lisans. **Command R+ (104B)**: RAG için mükemmel, CPU'da imkânsız (~60 GB). **Qwen2.5-14B**: daha doğru, 32 GB RAM + sabır ister. |
+| **Embedding** | **BAAI/bge-m3** | 100+ dilde eğitilmiş, **Türkçe morfolojisinde belirgin şekilde başarılı**. 1024 boyut, 8192 token pencere. Sorgu/pasaj için prefix gerektirmez → operasyonel hata riski düşük. | **multilingual-e5-large**: yakın performans ama `query:`/`passage:` prefix zorunlu; unutulursa doğruluk **sessizce** düşer. **e5-small**: zayıf donanımda hız için makul. **OpenAI embeddings**: air-gap'te kullanılamaz. |
+| **Vektör DB** | **ChromaDB 1.x (PersistentClient)** | Ayrı sunucu süreci **gerektirmez** — air-gap'te "bakımı yapılacak bir servis daha" olmaması büyük avantaj. İndeks tek klasörde; yedekleme = klasör kopyalama. 1.x çekirdeği Rust ile yazıldı, hazır wheel gelir, **C++ derleyici istemez**. | **Qdrant**: 1M+ parçada ve çok kullanıcıda daha iyi; Docker/servis yönetimi gerekir. Geçiş için yalnızca `src/vectorstore.py` yeniden yazılır. **FAISS**: hızlı ama metadata/silme elle yönetilir. |
+| **Arama** | **Hibrit: vektör + BM25, RRF birleştirme** | Yalnızca vektör araması nadir özel isimleri ve birebir ifadeleri ("KDV hariç", "ADL-2024/117") ıskalar; kendi içinde çok benzer sözleşme metinlerinde doğru sayfa ilk sıralara giremez. BM25 tam bunu yakalar. Sıralamalar RRF ile birleşir, ardından kelime kapsamıyla ölçeklenir. **Ek model/RAM gerekmez.** | Saf vektör: özel isimlerde zayıf. Saf BM25: eşanlamlıları kaçırır. Skorları doğrudan toplamak: ölçekler uyuşmaz (kosinüs 0–1, BM25 0–30). |
+| **Framework** | **İnce özel katman + `langchain-text-splitters`** | Tam LangChain/LlamaIndex kurulumu air-gap'te **onlarca geçişli bağımlılık** demek; ayrıca prompt'a görünmeyen metinler ekleyebiliyorlar. Halüsinasyon güvencesi verilen bir sistemde **LLM'e giden her karakterin denetlenebilir olması** şart. Yalnızca metin bölücüsü kütüphaneden alındı. | Tam LangChain: hızlı prototip, zor denetim. LlamaIndex: aynı sorun. |
+| **Arayüz** | **FastAPI + saf HTML/CSS/JS** | DOM üzerinde tam kontrol. Yanıt token token akar, sayfa yeniden çalışmaz. **Hiçbir JS kütüphanesi/CDN yok** → air-gap'te tek satır bile dışarı bakmaz. | **Streamlit**: hızlı prototip ama her etkileşimde tüm betiği yeniden çalıştırır, tasarım hazır tema sınırlarına takılır. **Gradio**: benzer kısıt. **Open WebUI**: Docker + kendi RAG hattı; atıf/guardrail davranışı istenen sıkılıkta kurulamaz. |
+| **LLM çalıştırıcı** | **Ollama** | CPU'da GGUF için en pratik; tek komutla servis, model RAM'de tutulur (`keep_alive`). | **vLLM**: GPU'da çok üstün, **CPU'da pratik değil**. GPU'ya geçilirse `config.yaml → llm.provider: vllm` yeterlidir. **llama.cpp server**: daha yalın ama model yönetimi elle. |
+
+### 3.3 Türkçeye özgü uyarlamalar
+
+Hazır BM25 kütüphaneleri İngilizce varsayımlarıyla gelir ve Türkçede sessizce yanlış çalışır. `src/bm25.py` saf Python ile yazıldı çünkü şunlar gerekliydi:
+
+- **`tr_lower`** — Python'un `.lower()` metodu `I` harfini `i` yapar; Türkçede `I → ı` olmalıdır. `"IZIN"` ile `"izin"` eşleşmezse arama çöker.
+- **Ek ayıklama** — `kaynağından`, `kaynaklar`, `kaynak` aynı kökten gelir; kaba bir önek eşleştirmesi kullanılır (tam morfolojik çözümleyici air-gap'te fazladan bağımlılıktır).
+- **Ünsüz yumuşaması** — `kaynak → kaynağ-`; doğrulama düzenli ifadeleri bu yüzden `kayna[kğ]` biçiminde yazıldı.
+- **Denklikler** — soru "Kasım 2024" derken belge "11/2024" yazar; "üçüncü" derken "3." yazar. `_equivalents()` bu eşleşmeleri **tek yönlü** (kelime → sayı) üretir. Ters yön denendi ve geri alındı: `"3. Vardiya"` sorgusu `"mart"` ile eşleşip gürültü yaratıyordu.
+
+---
+
+## 4. Proje yapısı
+
+```
+belge-asistani/
+│
+├── server.py                       ➤ FastAPI sunucusu (API + akışlı yanıt)
+├── config.yaml                     ➤ TÜM parametreler burada (kodda sabit değer yok)
+├── requirements.txt                ➤ Sürümleri sabitlenmiş bağımlılıklar
+├── LICENSE                         ➤ MIT (+ model lisans notları)
+│
+├── baslat.bat                      ➤ [Windows] tek tıkla başlatıcı
+├── kurulum.bat                     ➤ [Windows] tek seferlik kurulum
+├── indeksle.bat                    ➤ [Windows] belge indeksleme
+├── ocr-kur.bat                     ➤ [Windows] Tesseract tespiti + yapılandırma
+│
+├── src/
+│   ├── airgap.py                   ➤ Ağ izolasyonu (socket yaması + offline env)
+│   ├── config.py                   ➤ Yapılandırma yükleyici
+│   ├── loaders.py                  ➤ PDF/DOCX/XLSX/CSV/TXT → konumlu metin blokları
+│   ├── ocr.py                      ➤ Taranmış sayfa tespiti, OCR, kalite puanlama
+│   ├── ingest.py                   ➤ Madde bazlı parçalama + embedding + artımlı indeks
+│   ├── embedder.py                 ➤ bge-m3 sarmalayıcı (yalnızca yerel dosya)
+│   ├── vectorstore.py              ➤ ChromaDB katmanı
+│   ├── bm25.py                     ➤ Türkçeye uyarlanmış BM25 + RRF + kelime kapsamı
+│   ├── prompts.py                  ➤ STRICT RAG prompt şablonları
+│   ├── llm_client.py               ➤ Ollama / vLLM istemcisi (yalnızca 127.0.0.1)
+│   ├── rag_engine.py               ➤ Arama → RRF → MMR → eşik → prompt → doğrulama
+│   └── verify.py                   ➤ Atıf, meta-cümle ve sayı doğrulaması
+│
+├── web/
+│   ├── index.html                  ➤ Tek sayfa arayüz
+│   ├── style.css                   ➤ Tema (yalnızca CSS değişkenleri)
+│   └── app.js                      ➤ Akış, yükleme, ayarlar — bağımlılık yok
+│
+├── assets/
+│   └── logo.svg                    ➤ Nötr işaret (kendi logonuzla değiştirin)
+│
+├── scripts/
+│   ├── download_models.py          ➤ [internetli] model indirici
+│   ├── prepare_offline_bundle.ps1  ➤ [internetli] transfer paketi (Windows)
+│   ├── prepare_offline_bundle.sh   ➤ [internetli] transfer paketi (Linux)
+│   ├── verify_offline.py           ➤ Kurulum kabul testi (10 kontrol)
+│   ├── setup_ocr.py                ➤ Tesseract tespiti + config.yaml güncelleme
+│   ├── make_test_pdf.py            ➤ Sentetik test belgesi üreticisi
+│   └── find_text.py                ➤ İndekste düz metin arama (teşhis aracı)
+│
+├── eval/
+│   ├── run_eval.py                 ➤ Doğruluk ölçümü + parametre taraması
+│   ├── testset_depo.yaml           ➤ 29 soru — dijital sürüm
+│   └── testset_taranmis.yaml       ➤ 16 soru — taranmış sürüm (OCR maliyeti)
+│
+├── ornek_belgeler/
+│   ├── dijital/depo_sozlesmesi.pdf         ➤ 20 sayfa, temiz metin
+│   └── taranmis/depo_ekler_taranmis.pdf    ➤ 3 sayfa, taranmış görüntü
+│
+├── data/                           ➤ [git dışı] belgeler, indeks, manifest
+├── models/                         ➤ [git dışı] bge-m3, (ops.) reranker
+└── logs/                           ➤ [git dışı] denetim günlüğü
+```
+
+> `data/`, `models/` ve `logs/` **bilinçli olarak** versiyon kontrolü dışındadır: kurumsal belgeler, belge metinlerinin tamamını barındıran vektör indeksi ve gerçek soru-yanıt kayıtları içerirler. Klasörler ilk çalıştırmada otomatik oluşur.
+
+---
+
+## 5. Kullanım
+
+### 5.1 Desteklenen belge türleri
+
+| Tür | Uzantı | Not |
+|---|---|---|
+| PDF (dijital) | `.pdf` | Sayfa numarası atıfta gösterilir; tablolar satır bütünlüğü korunarak okunur |
+| PDF (taranmış) | `.pdf` | **Otomatik OCR** — bkz. §5.4 |
+| Word | `.docx` | Paragraf ve tablo numarası korunur |
+| Excel | `.xlsx` `.xlsm` `.xls` | Satır bazlı parçalama, birleştirilmiş hücreler yayılır |
+| Metin | `.txt` `.md` | Kodlama otomatik tespit edilir |
+| Ayraçlı | `.csv` `.tsv` | Ayraç otomatik tespit edilir |
+
+### 5.2 Belge indeksleme
+
+```bash
+python -m src.ingest                  # artımlı — yalnızca değişen dosyalar
+python -m src.ingest --rebuild        # sıfırdan (chunk ayarı değiştiyse ZORUNLU)
+python -m src.ingest --dry-run        # yazmadan raporla
+python -m src.ingest --path <klasör>  # farklı bir klasörü indeksle
+```
+
+Artımlı indeksleme SHA-256 özetine dayanır: değişmemiş dosya yeniden işlenmez, güncellenen dosyanın eski parçaları silinir, diskten silinen belge indeksten otomatik düşer.
+
+> **Arayüzden yüklenen belgeler otomatik indekslenmez.** Yükleme sonrası çekmecedeki *"İndeksi güncelle"* düğmesine basın veya `indeksle.bat` çalıştırın. Belge listesindeki işaretler durumu gösterir: ● indekslendi · ○ indekslenmedi · ▲ hata.
+
+### 5.3 Başlatma
+
+```bash
+ollama serve            # ayrı terminalde (Windows'ta servis olarak çalışır)
+python server.py        # veya: uvicorn server:app --host 127.0.0.1 --port 8501
+```
+
+### 5.4 Taranmış PDF'ler — OCR
+
+Fotokopi/tarayıcı çıktısı PDF'lerde metin katmanı yoktur. Sistem bunu **sayfa bazında** tespit eder ve yalnızca o sayfalara OCR uygular; dijital sayfalar hızlı yoldan okunmaya devam eder (karma belgeler desteklenir).
+
+Python paketleri `requirements.txt` içindedir, ancak **Tesseract motoru ayrıca kurulmalıdır**:
+
+- **Windows:** [UB-Mannheim kurulumu](https://github.com/UB-Mannheim/tesseract/wiki) — kurulumda **Turkish** dil paketini işaretleyin. Ardından `ocr-kur.bat` çalıştırın; kurulum yolunu bulup `config.yaml`'a yazar.
+- **Linux:** `sudo apt install tesseract-ocr tesseract-ocr-tur`
+- **Air-gap:** kurulum dosyasını ve `tur.traineddata` dosyasını transfer paketine ekleyin.
+
+| Ayar (`config.yaml → ocr`) | Varsayılan | Açıklama |
+|---|---|---|
+| `enabled` | `true` | Kapatılırsa taranmış PDF'ler hata listesine düşer |
+| `language` | `tur+eng` | Karma belgelerde iki dili birlikte kullanın |
+| `dpi` | `300` | Düşürmek hızlandırır ama rakam hatalarını artırır |
+| `preprocess` | `true` | Kontrast + keskinlik iyileştirmesi |
+| `min_chars_per_page` | `60` | Bu değerin altındaki sayfa "taranmış" sayılır |
+| `tesseract_cmd` | `""` | Boşsa PATH ve bilinen konumlar otomatik taranır |
+
+> **Hız:** OCR sayfa başına CPU'da 3–10 saniye sürer; 200 sayfalık taranmış bir belge 15–30 dakika alabilir. Bu yalnızca ilk indekslemededir.
+>
+> **Kalite:** OCR çıktısı hatasız değildir (`5`↔`S`, `1`↔`l`, `0`↔`O`). Sistem her sayfaya kalite puanı verir ve düşük puanlıları raporda listeler. **Taranmış belgelerden gelen sayısal yanıtları kaynaktan doğrulayın.**
+
+### 5.5 Arayüz
+
+- **Sohbet:** soru koyu ve büyük, yanıt akıcı okuma tipografisiyle. Yanıt token token akar.
+- **Atıflar:** `[K1]` rozetleri tıklanabilir — ilgili kaynak kartına kaydırır ve vurgular.
+- **Kaynaklar:** katlanır panelde belge adı, sayfa/satır numarası, benzerlik yüzdesi ve ham metin. Yanıtta atıf verilen parçalar sol kenarında şeritle işaretlenir.
+- **Reddedildiğinde bile** bulunan parçalar gösterilir ("bulunan en yakın N parça — yanıtta kullanılmadı"). Bu ayrım olmadan *"doğru parça hiç gelmedi mi, yoksa geldi de model mi kullanamadı?"* sorusu cevaplanamaz ve eşik ayarı körlemesine yapılır.
+- **Tema:** `config.yaml → app.theme` değerleri açılışta CSS değişkenlerine yazılır; renk değiştirmek için kod dokunuşu gerekmez.
+
+### 5.6 Markalama
+
+`assets/logo.svg` dosyasının üzerine kendi logonuzu yazın (PNG kullanacaksanız `config.yaml → app.logo_path` güncelleyin). Başlık, alt başlık ve tüm renkler `config.yaml → app` altındadır; CSS içinde sabit renk yoktur.
+
+---
+
+## 6. Halüsinasyon önleme mimarisi
+
+Tek bir prompt talimatı yeterli **değildir**. Sistemde birbirinden bağımsız **altı katman** vardır:
+
+| # | Katman | Nerede | Ne yapar |
+|---|---|---|---|
+| 1 | **Alaka eşiği** | `rag_engine.retrieve()` | En iyi parçanın benzerliği `min_similarity` altındaysa **LLM hiç çağrılmaz**. Model uydurma fırsatı bulamaz. |
+| 2 | **Kelime kapsamı** | `bm25.keyword_coverage()` | Sorunun ayırt edici kelimeleri hiçbir parçada geçmiyorsa aday elenir. Anlamsal olarak "yakın" ama konu dışı parçaları keser. |
+| 3 | **Strict prompt** | `prompts.SYSTEM_PROMPT` | Kapalı-kitap yasağı, atıf zorunluluğu, kısmi bilgi kuralı, tablo satır eşleşmesi kuralı, yorum yasağı. |
+| 4 | **Atıf denetimi** | `rag_engine._validate_and_finalize()` | Yanıtta hiç `[K#]` yoksa **reddedilir**. Verilmemiş bir kaynak numarası varsa (`[K7]` ama 5 kaynak var) **tamamen reddedilir** — bu, modelin uydurmaya başladığının en güçlü sinyalidir. |
+| 5 | **Cümle bazında atıf** | `verify.check()` | Sayı içeren veya uzun HER cümlede `[K#]` olmalı. Atıfsız cümle yanıttan **ayıklanır** (tüm yanıt reddedilmez). |
+| 6 | **Sayı doğrulama** | `verify.check()` | Yanıttaki her sayı, verilen kaynak metinlerde birebir geçmeli. Uydurulan veya modelin kendi hesapladığı sayıyı yakalar. |
+
+> **5 ve 6 gerçek bir hatadan doğdu.** Model şunu üretti:
+> *"İşin süresi ... otuziki aydır [K2]. ... Bu nedenle toplam iş süresi **30 aydır**."*
+> Kaynakta 32 yazıyordu. Yanıtın başında atıf olduğu için "atıf var mı?" denetimi bunu kaçırıyordu. Başka bir denemede model personel dağılımını (1+2+5=8) uydurup kendi verdiği 20 rakamıyla çelişti. Katman 5 atıfsız cümleyi, katman 6 kaynakta olmayan sayıyı yakalar.
+
+> **Katman 5'in ilk hâli fazla sertti.** Atıfsız tek cümle yüzünden yanıtın tamamı reddediliyordu ve yanlış ret oranı %75'e çıkmıştı. `sentence_citation_action: "strip"` ile davranış "reddet"ten "ayıkla"ya çevrildi; doğruluk %75 → %89,7'ye yükseldi.
+
+Ek olarak: `temperature 0.0` + `seed 42` (tekrar üretilebilirlik), belge başına parça sınırı (tek belgenin bağlamı domine etmesini engeller), `strong_similarity` altında kullanıcıya düşük güven uyarısı.
+
+### 6.1 Kullanılan system prompt
+
+```text
+Kurum içi belge asistanısın. YALNIZCA sana verilen KAYNAK bloklarını
+kullanarak Türkçe yanıt verirsin.
+
+## KURALLAR
+1. Eğitim verindeki genel bilgini KULLANMA. Her cümle kaynaklardan
+   doğrulanabilir olmalı.
+2. Sayı, tarih, oran veya isim içeren HER cümlenin sonuna atıf koy:
+   [K2] ya da [K1][K3]. Atıfını veremeyeceğin cümleyi hiç yazma.
+3. Yanıt kaynaklarda yoksa tahmin yürütme; yalnızca şunu yaz:
+   "Bu konu hakkında yüklenen belgelerde bilgi bulunmamaktadır."
+   Bu cümleyi YA TEK BAŞINA yaz YA DA hiç yazma. Cevabını verdiysen
+   sonuna bu cümleyi EKLEME.
+4. Sorunun bir kısmı cevaplanabiliyorsa o kısmı atıfla ver, eksik
+   konuyu adıyla belirt.
+5. Sana verilmemiş kaynak numarası, madde numarası, tarih veya sayı ÜRETME.
+6. Kaynaklar çelişiyorsa ikisini de atıfla göster, kendin karar verme.
+7. Hukuki/mali yorum yapma; belgede yazanı aktar.
+8. Sayıları kaynaktaki biçimiyle kopyala. Toplama, çıkarma, yuvarlama YAPMA.
+9. TABLOLARDA SATIR EŞLEŞMESİ: Soruda tarih/dönem/kod geçiyorsa yalnızca
+   o değerin BİREBİR bulunduğu satırı kullan, komşu satırı asla kullanma.
+10. ŞU YAZIMLAR AYNIDIR; farklı yazıldı diye "bilgi yok" DEME:
+    Ocak=01 · Kasım=11 | birinci=1, üçüncü=3 | onsekiz=18, otuziki=32
+11. "Bu nedenle", "Sonuç olarak" gibi kapanış cümlesi KURMA. Bilgiyi bir
+    kez atıfla ver ve dur.
+```
+
+Kaynaklar `[K1]`, `[K2]` gibi **kısa ve makinece ayrıştırılabilir** etiketlerle numaralandırılır (dosya adı yazdırmak modele uzun ve hatalı atıf ürettirir). Her blok `---` ile sınırlandırılır. Talimat hem system hem user mesajında tekrarlanır — küçük modellerde bu tekrar kural uyumunu belirgin şekilde artırır.
+
+> **Prompt uzunluğu bir kaynak meselesidir.** Bu metin her soruda bağlam penceresine girer; kurallar biriktikçe kaynaklara yer kalmaz. Kural eklerken `num_ctx` bütçesini kontrol edin.
+
+---
+
+## 7. Parametre optimizasyonu
+
+### 7.1 Değerler ve gerekçeleri
+
+| Parametre | Varsayılan | Aralık | Açıklama |
+|---|---|---|---|
+| `chunk_size` | **700** karakter | 500–1200 | Türkçe mevzuatta bir "MADDE" ortalama 400–900 karakterdir. `article_aware_split` zaten madde sınırlarını önceliklendirir; 700 çoğu maddeyi bölmeden kapsar. Büyütmek gürültüyü ve CPU'da prefill süresini artırır. |
+| `chunk_overlap` | **150** (~%21) | %10–25 | Bir cümle iki parçaya bölünürse bilgi kaybolmasın diye. %25 üzeri indeksi ve tekrarlı sonuçları gereksiz büyütür. |
+| `article_aware_split` | `true` | — | `MADDE 5.1` gibi sınırlarda böler. Yalnızca satır başında veya `.`/`:` sonrasında eşleşir — aksi hâlde `(5.1, 5.2)` gibi metin içi referanslar cümleyi ortadan bölüyordu. |
+| `table_rows_per_chunk` | **1** | 1–3 | **Tablo doğruluğunun anahtarı.** Tüm tablo tek parçaya girerse model komşu satırı okur (sorulan 5. ay, gelen 6. ay). Her satır ayrı parça olunca bu imkânsızlaşır. |
+| `top_k` | **20** | 10–40 | Her yöntemden çekilecek aday sayısı. Ucuzdur (ms mertebesi); asıl maliyet `final_k`'dadır. |
+| `final_k` | **4** | 3–8 | LLM'e giden parça sayısı. 7B sınıfında 8 üzerinde **"lost in the middle"** başlar. CPU'da her ek parça ~5–10 sn prefill demektir. `num_ctx: 4096` ile 4 uygundur. |
+| `min_similarity` | **0.35** | 0.25–0.50 | **Ret davranışının ana kolu.** Yükseltirseniz uydurma azalır, "bilgi bulunamadı" artar. Düşürürseniz tersi. §7.2'ye göre kalibre edin. |
+| `min_keyword_coverage` | **0.5** | 0.3–0.7 | Sorunun ayırt edici kelimelerinin en az bu oranı bir parçada geçmeli. |
+| `mmr_lambda` | **0.6** | 0.5–0.8 | 1.0 = saf benzerlik (tekrarlı parçalar), 0.0 = saf çeşitlilik (alakasızlaşır). MMR, hibrit sıralamayı bozmasın diye ham kosinüs yerine **birleştirilmiş skoru** kullanır. |
+| `max_chunks_per_document` | **3** | 2–5 | Tek belgenin bağlamı doldurmasını engeller. Tek belge indekslendiğinde `final_k`'ya kadar geri doldurma yapılır. |
+| `temperature` | **0.0** | 0.0–0.2 | RAG'de yaratıcılık **istenmeyen** bir özelliktir. 0.0 aynı soruya aynı yanıtı verir (denetlenebilirlik). 0.3 üzerinde belge dışına çıkma gözle görülür artar. |
+| `num_ctx` | **4096** (16 GB) / 8192 (32 GB) | 4096–16384 | Sistem prompt + bağlam + yanıt toplamını karşılamalı. **`out-of-memory` hatasında ilk düşürülecek parametre budur.** |
+| `context_char_budget` | **5500** | — | `num_ctx` ile birlikte ayarlanır. Kabaca `budget ≈ (num_ctx − num_predict − 900) × 2.7`. Kod ayrıca `_fit_char_budget()` ile bu değeri pencereye göre otomatik daraltır. |
+| `num_gpu` | **0** | — | Saf CPU. Ollama aksi hâlde sabitlenmiş (pinned) ana bellek ayırmaya çalışır ve GPU'suz makinede `CUDA_Host buffer` hatası verir. |
+| `keep_alive` | **30m** | — | Model RAM'de kalsın; her soruda diskten yeniden yüklenmesin. |
+
+### 7.2 `min_similarity` kalibrasyonu
+
+Bu tek parametre sistemin "fazla konuşkan" mı "fazla suskun" mu olacağını belirler. Gözle ayarlamayın, **ölçün**:
+
+1. Kendi belgelerinizden **20 cevaplanabilir** + **20 cevaplanamaz** soru yazın (`eval/testset_depo.yaml` biçimini örnek alın).
+2. Tarama çalıştırın:
+   ```bash
+   python eval/run_eval.py --testset eval/kendi_setim.yaml --sweep --out eval/tarama.json
+   ```
+3. İki metriğe bakın: `ret_dogrulugu_%` **≥ %95** olmalı, `yanlis_ret_%` **≤ %10**.
+4. Ret doğruluğu düşükse eşiği 0.05 artırın; yanlış ret yüksekse 0.05 azaltın.
+
+> İkisi arasında seçim gerekirse **eşiği yüksek tutun**. Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır.
+
+### 7.3 Doğruluk artırma sırası (maliyet/fayda)
+
+1. **Belge kalitesi** — taranmış PDF'lere iyi OCR, bozuk karakterlerin düzeltilmesi. *En yüksek etki, sıfır çalışma zamanı maliyeti.*
+2. **Eşik kalibrasyonu** (§7.2) — bedava.
+3. **`chunk_size` denemesi** — 500 / 700 / 1000 ile üç kez `--rebuild` + eval. *Birkaç saat.*
+4. **Reranker'ı açmak** (`reranker.enabled: true`) — isabeti belirgin artırır, soru başına **+3–8 sn** CPU maliyeti.
+5. **14B modele geçmek** — 32 GB RAM gerektirir, hız ~%40 düşer.
+
+### 7.4 Belge tipine göre chunk önerileri
+
+| Belge tipi | `chunk_size` | `chunk_overlap` | Not |
+|---|---|---|---|
+| Yönetmelik / sözleşme (madde yapılı) | 700–900 | 150 | `article_aware_split` madde sınırlarını önceliklendirir |
+| Teknik şartname / prosedür | 1000–1200 | 200 | Adım listeleri bölünmemeli |
+| Toplantı tutanağı / yazışma | 500–700 | 120 | Kısa, bağımsız paragraflar |
+| Tablo ağırlıklı (XLSX/CSV) | — | — | Satır bazlı bloklara ayrılır, başlık her bloğa eklenir |
+
+---
+
+## 8. Donanım gereksinimleri (CPU-only)
+
+| | **Asgari** | **Önerilen** | **İdeal** |
+|---|---|---|---|
+| CPU | 8 çekirdek, AVX2 (i5-11400 / Ryzen 5 5600) | 12–16 çekirdek (i7-13700 / Ryzen 7 7700) | 24–32 çekirdek Xeon / EPYC |
+| RAM | **16 GB** | **32 GB** | **64 GB** |
+| Disk | 40 GB SSD | 120 GB NVMe | 250 GB NVMe (RAID1) |
+| LLM | Qwen2.5-**3B** Q4_K_M | Qwen2.5-**7B** Q4_K_M | Qwen2.5-**14B** Q4_K_M |
+| Embedding | e5-small (384 boyut) | **bge-m3** | bge-m3 + reranker |
+| Beklenen hız | 4–7 token/sn | 8–14 token/sn | 10–16 token/sn |
+| Yanıt gecikmesi | 30–70 sn | **12–30 sn** | 8–18 sn |
+| Eşzamanlı kullanıcı | 1 | 1–2 | 3–5 |
+
+**RAM bütçesi** (önerilen yapılandırma): LLM ağırlıkları ~4.7 GB · KV cache (`num_ctx 4096`) ~0.5 GB · bge-m3 ~2.3 GB · ChromaDB + Python + sunucu ~1.2 GB · işletim sistemi ~4 GB → **~13 GB**. 16 GB sınırda, 32 GB rahat.
+
+**Disk bütçesi:** Qwen2.5-7B 4.7 GB · bge-m3 2.3 GB · (ops.) reranker 2.3 GB · Python + torch(CPU) ~4 GB · vektör indeksi (10.000 sayfa ≈ 40.000 parça) ~1.2 GB.
+
+### CPU'ya özgü kritik uyarı — "prefill" darboğazı
+
+CPU'da asıl bekleme token üretmekten çok **prompt'u okumaktan** gelir. 6.000 token'lık bir bağlam, 8 çekirdekli bir makinede 30–60 saniye ek gecikme yaratır. Varsayılanlar bu yüzden bilinçli olarak muhafazakârdır: `final_k: 4`, `context_char_budget: 5500`, `num_ctx: 4096`, `reranker.enabled: false`.
+
+> **Genel kural:** CPU'da doğruluğu artırmanın en ucuz yolu bağlamı büyütmek değil, **daha isabetli 4 parça getirmektir** (iyi chunking + eşik kalibrasyonu).
+
+---
+
+## 9. Air-gap kurulum (transfer paketi)
+
+Kurulum üç aşamalıdır. **1. aşama internetli bir makinede yapılır; air-gap makinede hiçbir indirme komutu çalıştırılmaz.**
+
+### Aşama 1 — Staging (internetli makine)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\prepare_offline_bundle.ps1   # Windows
+```
+```bash
+bash scripts/prepare_offline_bundle.sh                                        # Linux
+```
+
+Betik şunu üretir:
+
+```
+offline_bundle/
+├── wheelhouse/        # Tüm .whl dosyaları (torch CPU sürümü dahil)
+├── models/            # bge-m3 (+ ops. reranker) — gerçek dosyalar, symlink DEĞİL
+├── ollama_models/     # Qwen2.5-7B Q4_K_M blob'ları
+├── proje/             # Kaynak kod
+├── KURULUM.txt
+└── SHA256SUMS         # Transfer bütünlük doğrulaması
+```
+
+Pakete elle eklenmesi gerekenler: Python kurulum dosyası, `OllamaSetup.exe` / `ollama-linux-amd64.tgz`, taranmış PDF varsa Tesseract kurulumu + `tur.traineddata`.
+
+### Aşama 2 — Transfer
+
+Kurumun onaylı taşınabilir medyasına kopyalayın (zararlı yazılım taraması zorunlu), sonra air-gap makinede bütünlüğü doğrulayın:
+
+```bash
+cd offline_bundle && sha256sum -c SHA256SUMS          # Linux
+```
+
+### Aşama 3 — Air-gap makinede kurulum
+
+```powershell
+# 1) Python 3.11 kurun (offline installer)
+# 2) Ollama kurun, servisi durdurun, model deposunu yerleştirin
+Stop-Service ollama -ErrorAction SilentlyContinue
+Copy-Item -Recurse offline_bundle\ollama_models\* "$env:USERPROFILE\.ollama\models\"
+Start-Process ollama -ArgumentList "serve"
+ollama list                                    # model görünmeli
+
+# 3) Proje ve modeller
+Copy-Item -Recurse offline_bundle\proje  C:\belge-asistani
+Copy-Item -Recurse offline_bundle\models C:\belge-asistani\models
+
+# 4) Python ortamı — tamamen çevrimdışı
+cd C:\belge-asistani
+python -m venv .venv ; .venv\Scripts\activate
+pip install --no-index --find-links=<USB>\offline_bundle\wheelhouse -r requirements.txt
+
+# 5) Kabul testi
+python scripts\verify_offline.py
+```
+
+`verify_offline.py` çıktısında **10 kontrolün tamamı ✔ olmalıdır** (indeks henüz boşken 2 kontrol `!` verir, normaldir):
+
+```
+ ✔  Python sürümü                     Python 3.11.9 (AMD64)
+ ✔  Sanal ortam                       .venv etkin
+ ✔  Python paketleri                  tümü kurulu
+ ✔  Disk alanı                        184.2 GB boş
+ ✔  Air-gap koruması                  harici bağlantı bloklandı, localhost açık
+ ✔  Embedding modeli dosyaları        bge-m3 (14 dosya)
+ ✔  Embedding üretimi                 models/bge-m3 → 1024 boyut
+ !  Vektör veri tabanı                koleksiyon boş — 'python -m src.ingest'
+ ✔  LLM servisi                       qwen2.5:7b-instruct-q4_K_M hazır
+ ✔  LLM metin üretimi                 yanıt: 'HAZIR' (1.1 sn)
+```
+
+### Aşama 4 — Ağı fiziksel olarak kesin
+
+```powershell
+Get-NetAdapter | Disable-NetAdapter -Confirm:$false     # Windows
+```
+```bash
+nmcli networking off                                    # Linux
+```
+
+Uygulama ayrıca **süreç içinde** localhost dışı tüm TCP bağlantılarını ve DNS çözümlemelerini bloklar (`src/airgap.py`). Ağ kablosu takılı kalsa bile veri dışarı çıkamaz.
+
+---
+
+## 10. Güvenlik ve KVKK
+
+### Uygulanmış olanlar
+
+- **Süreç içi ağ izolasyonu:** localhost dışı `connect()`, `connect_ex()`, `create_connection()` ve `getaddrinfo()` çağrıları `AirGapViolation` fırlatır.
+- **Telemetri kapalı:** `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, `ANONYMIZED_TELEMETRY=False`.
+- **Sıfır dış bağımlılık (ön yüz):** arayüzde hiçbir CDN, web fontu veya JS kütüphanesi yok.
+- **LLM adresi kod seviyesinde doğrulanır:** yalnızca `127.0.0.1` kabul edilir.
+- **Sunucu yalnızca `127.0.0.1` dinler.**
+- **Denetim günlüğü:** soru, ret nedeni, benzerlik skoru, kullanılan kaynaklar → `logs/audit.jsonl`.
+- **Belgeler, indeks ve günlükler `.gitignore` ile versiyon kontrolü dışında.**
+
+### Devreye alma öncesi tamamlanması gerekenler
+
+| Konu | Öneri |
+|---|---|
+| **Kimlik doğrulama** | Uygulamanın yerleşik kullanıcı yönetimi yoktur. Tek kullanıcılı kiosk değilse önüne kurumsal SSO/LDAP doğrulaması yapan bir ters vekil sunucu (IIS + Windows Authentication, nginx + Kerberos) koyun. |
+| **Yetkilendirme** | Belge bazlı erişim gerekiyorsa metadata'ya `gizlilik_seviyesi` ekleyip `retrieve()` içindeki `where` filtresini kullanıcı rolüne bağlayın. |
+| **Disk şifreleme** | `data/` ve `logs/` hassas veri içerir → BitLocker / LUKS zorunlu. Vektör indeksi belge metinlerinin **tamamını** barındırır; belge kadar hassastır. |
+| **Günlük saklama** | `logs/audit.jsonl` soru metinlerini saklar; KVKK saklama sürenize göre rotasyon ve imha kuralı tanımlayın. Gerekirse `security.audit_log: false`. |
+| **Ağ** | Kurulum sonrası ağ arayüzünü devre dışı bırakın; 8501 ve 11434 portlarını dışa kapatın. |
+| **Değişiklik yönetimi** | Her model/parametre değişikliğinden sonra `verify_offline.py` + `run_eval.py` çalıştırılıp sonuç kayıt altına alınmalı. |
+| **Kullanıcı bilgilendirmesi** | "Yanıtlar yalnızca yüklenen belgelere dayanır" uyarısı korunmalı; nihai sorumluluk kaynağı doğrulayan kullanıcıdadır. |
+
+---
+
+## 11. Sorun giderme
+
+| Belirti | Neden / Çözüm |
+|---|---|
+| `Microsoft Visual C++ 14.0 or greater is required` | ChromaDB **0.5.x** kurulmaya çalışılıyor; bu sürüm `chroma-hnswlib` C++ eklentisini kaynaktan derler. Çözüm: `pip install "chromadb==1.5.9"`. Build Tools kurmanıza **gerek yok**. |
+| `ModuleNotFoundError` — paketler kurulu olmasına rağmen | Sanal ortam etkin değil. Komut satırında `(.venv)` öneki görünmeli: `.venv\Scripts\activate`. |
+| `unable to allocate CUDA_Host buffer` | GPU yokken Ollama sabitlenmiş bellek ayırmaya çalışıyor. `config.yaml → llm.num_gpu: 0`. |
+| `out of memory` / LLM 500 hatası | `num_ctx`'i 4096'ya, `num_predict`'i 700'e, `context_char_budget`'i 5500'e düşürün. Sırasıyla en etkilisi `num_ctx`'tir. |
+| `LLM sunucusuna ulaşılamıyor` | Ollama çalışmıyor. `ollama serve` başlatın; `ollama list` ile modeli doğrulayın. |
+| `Embedding modeli bulunamadı` | `models/bge-m3` eksik veya symlink kopyalanmış. Transferi `local_dir_use_symlinks=False` ile yapın; klasörde `model.safetensors` + `config.json` + `1_Pooling/` olmalı. |
+| `AirGapViolation` | Bir bileşen dışarı çıkmaya çalıştı — **bu bir güvenlik bulgusudur, koruma kapatılarak geçilmemelidir.** Hata mesajındaki hedef adresi ve çağıran kütüphaneyi inceleyin. |
+| Belge klasörde ama cevap gelmiyor | Belge listesindeki işarete bakın: ● indekslendi · ○ indekslenmedi · ▲ hata. Yükleme sonrası indeksi güncellemeniz gerekir. |
+| Taranmış PDF ▲ hata veriyor | Tesseract kurulu değil. `ocr-kur.bat` çalıştırın veya `sudo apt install tesseract-ocr tesseract-ocr-tur`. |
+| Tabloda yanlış satır okunuyor (5. ay sorulup 6. ay geliyor) | Tüm tablo tek parçaya girmiş. `table_rows_per_chunk: 1` ve `pdf_split_table_rows: true` olmalı, ardından **`--rebuild`**. |
+| Özel isim/kod içeren soru bulunamıyor | Hibrit arama açık olmalı: `retrieval.hybrid_enabled: true`. Kapalıysa yalnızca anlamsal arama çalışır ve nadir özel isimler kaybolur. |
+| Her soruya "bilgi bulunamadı" | (a) İndeks boş → `python -m src.ingest`. (b) `min_similarity` çok yüksek → 0.30'a düşürüp §7.2'ye göre kalibre edin. (c) e5 modeli kullanıyorsanız `query_prefix: "query: "` ve `passage_prefix: "passage: "` ayarlayıp **yeniden indeksleyin**. |
+| Aynı soruya farklı zamanlarda farklı yanıt | Bağlam penceresi taşıyor olabilir. Prompt + kaynaklar `num_ctx`'i aşarsa Ollama sessizce kırpar. `context_char_budget`'i düşürün. |
+| `chunk_size` değiştirdim, etkisi yok | Parçalama indeksleme anında yapılır. `python -m src.ingest --rebuild` zorunludur. |
+| Yanıtlar çok yavaş | `final_k`'yı 3'e düşürün; `reranker.enabled: false`; `keep_alive: 30m`; 3B modele geçin. |
+| İlk soru yavaş, sonrakiler hızlı | Normal — model RAM'e yükleniyor. `keep_alive` süresini uzatın. |
+| "port kullanımda" | `python -m uvicorn server:app --port 8502` veya 8501'i kullanan süreci kapatın. |
+
+### Teşhis araçları
+
+```bash
+python scripts/verify_offline.py                     # 10 maddelik kurulum kontrolü
+python scripts/find_text.py "aranan ifade"           # indekste düz metin ara
+python -m src.ingest --dry-run                       # yazmadan indeksleme raporu
+python eval/run_eval.py --testset eval/testset_depo.yaml
+```
+
+`find_text.py` özellikle değerlidir: *"bilgi gerçekten indekste yok mu, yoksa arama mı bulamadı?"* sorusunu ayırt eder. Bu ayrım olmadan eşik ayarı tahminle yapılır.
+
+---
+
+## 12. Lisans
+
+Kaynak kod **MIT** lisanslıdır (bkz. `LICENSE`). Kullanılan modeller kendi lisanslarına tabidir:
+
+| Bileşen | Lisans | Kurumsal kullanım |
+|---|---|---|
+| Qwen2.5-7B-Instruct | Apache-2.0 | Serbest |
+| BAAI/bge-m3 | MIT | Serbest |
+| bge-reranker-v2-m3 | Apache-2.0 | Serbest |
+| ChromaDB | Apache-2.0 | Serbest |
+| Ollama | MIT | Serbest |
+
+> Llama-3.1 kullanılacaksa Meta Llama 3.1 Community License, Gemma-2 için Gemma Terms of Use ayrıca değerlendirilmelidir; bu iki lisans Apache/MIT'den farklı yükümlülükler içerir.
+
+---
+
+*Bu sistem karar destek amaçlıdır. Üretilen yanıtlar, gösterilen kaynak belgeden doğrulanmadan resmî işlemlere esas alınmamalıdır.*

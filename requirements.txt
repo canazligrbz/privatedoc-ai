@@ -1,0 +1,56 @@
+# =====================================================================
+# Belge Asistanı — Yerel RAG  |  CPU-only bağımlılık listesi
+# Sürümler PINLENMİŞTİR: air-gap ortamda tekrar üretilebilirlik şart.
+# İnternetli makinede:  pip download -r requirements.txt -d wheelhouse/
+# Air-gap makinede:     pip install --no-index --find-links=wheelhouse -r requirements.txt
+# =====================================================================
+
+# --- Arayüz: FastAPI + saf HTML/CSS/JS (web/ klasörü) ---
+fastapi==0.115.5
+uvicorn==0.32.1
+python-multipart==0.0.17     # dosya yükleme için gerekli
+
+# --- Yapılandırma ---
+PyYAML==6.0.2
+pydantic==2.9.2
+
+# --- Belge okuyucular ---
+pypdf==5.1.0                 # PDF metin + sayfa numarası
+python-docx==1.1.2           # DOCX paragraf/tablo
+openpyxl==3.1.5              # XLSX / XLSM
+xlrd==2.0.1                  # Eski XLS biçimi
+chardet==5.2.0               # TXT/CSV kodlama tespiti
+
+# --- Taranmış PDF'ler için OCR ---
+# NOT: Bunlar Python tarafı. Tesseract OCR MOTORU ayrıca kurulmalıdır:
+#   Windows: https://github.com/UB-Mannheim/tesseract/wiki  (Turkish dil paketiyle)
+#   Linux  : sudo apt install tesseract-ocr tesseract-ocr-tur
+pypdfium2==4.30.0            # PDF sayfasını görüntüye çevirir (poppler gerekmez)
+pytesseract==0.3.13
+pillow==11.0.0
+
+# --- Chunking ---
+langchain-text-splitters==0.3.2
+
+# --- Embedding (yerel, CPU) ---
+# NOT: torch CPU sürümü ayrı indirilmelidir, aşağıdaki README'ye bakın.
+#      pip download torch==2.4.1+cpu --index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1
+sentence-transformers==3.2.1
+transformers==4.44.2
+tokenizers==0.19.1
+numpy==1.26.4
+
+# --- Vektör veri tabanı ---
+# ÖNEMLİ: chromadb 1.x kullanın. 0.5.x sürümleri `chroma-hnswlib` C++ eklentisini
+# kaynaktan derlemeye çalışır ve Windows'ta "Microsoft Visual C++ 14.0 required"
+# hatası verir. 1.x çekirdeği Rust ile yeniden yazıldı; hazır wheel ile gelir,
+# derleyici gerektirmez (cp39-abi3 → Python 3.9-3.13 uyumlu).
+chromadb==1.5.9
+
+# --- LLM istemcisi (yalnızca 127.0.0.1'e konuşur) ---
+httpx==0.27.2
+
+# --- Yardımcılar ---
+tqdm==4.66.5
+rich==13.9.2

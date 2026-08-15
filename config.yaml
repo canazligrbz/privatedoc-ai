@@ -1,0 +1,200 @@
+# =====================================================================
+# Belge Asistanı - Merkezi Yapılandırma
+# Tüm davranışsal parametreler burada. Kod içinde sabit değer yoktur.
+# =====================================================================
+
+app:
+  # Marka içermeyen, genel amaçlı adlandırma. Kuruma özel isim isterseniz
+  # yalnızca bu üç satırı ve assets/logo.svg dosyasını değiştirmeniz yeterli.
+  title: "Belge Asistanı"
+  subtitle: "Yerel belgelerinize dayalı çevrimdışı soru-cevap"
+  organization: ""
+  footer_note: "Yanıtlar yalnızca yüklenen belgelere dayanır."
+  # Renk paleti - arayüz tamamen bu değerlerden türetilir.
+  theme:
+    primary: "#3A5F8A"      # Sakin, doygunluğu düşük mavi
+    primary_dark: "#2E4C6E"
+    primary_light: "#EDF2F8"
+    accent: "#5B8CBE"
+    surface: "#FFFFFF"
+    background: "#F6F7F9"
+    border: "#E5E8EC"
+    text: "#2B3138"
+    text_muted: "#6E767F"
+    success: "#3D7A5C"
+    warning: "#9A7228"
+    danger: "#A94A3E"
+  logo_path: "assets/logo.svg"      # Kendi işaretinizi koymak için bu dosyayı değiştirin
+
+paths:
+  documents: "data/documents"       # Kaynak belgeler
+  vectordb: "data/vectordb"         # ChromaDB kalıcı dizini
+  models: "models"                  # Yerel model dosyaları
+  logs: "logs"
+  manifest: "data/ingest_manifest.json"
+
+security:
+  # True ise: 127.0.0.1 / ::1 dışındaki TÜM giden TCP bağlantıları
+  # işletim sistemi seviyesinde değil, süreç seviyesinde bloklanır.
+  block_outbound_network: true
+  allowed_hosts:
+    - "127.0.0.1"
+    - "localhost"
+    - "::1"
+  # HuggingFace / transformers kütüphanelerini zorla çevrimdışı moda alır.
+  force_offline_env: true
+  # Her soru-cevap kaydını yerel denetim günlüğüne yazar (KVKK: metin maskeleme opsiyonlu).
+  audit_log: true
+  audit_log_file: "logs/audit.jsonl"
+
+embedding:
+  # Yerel klasör yolu. HuggingFace repo adı DEĞİL - air-gap'te indirme yapılmaz.
+  model_path: "models/bge-m3"
+  fallback_model_path: "models/multilingual-e5-large"
+  device: "cpu"
+  batch_size: 4                # CPU'da 4-8 arası idealdir
+  max_seq_length: 1024         # bge-m3 8192'ye kadar destekler; CPU'da 1024 hız/doğruluk dengesi
+  normalize_embeddings: true
+  # e5 ailesi prefix ister, bge-m3 istemez. Model değiştirirseniz burayı güncelleyin.
+  query_prefix: ""             # multilingual-e5-* için: "query: "
+  passage_prefix: ""           # multilingual-e5-* için: "passage: "
+
+llm:
+  provider: "ollama"                       # ollama | vllm (OpenAI uyumlu)
+  base_url: "http://127.0.0.1:11434"
+  model: "qwen2.5:7b-instruct-q4_K_M"      # CPU-only için önerilen
+  temperature: 0.0                         # RAG'de kesinlikle 0.0-0.2
+  top_p: 0.9
+  top_k: 20
+  repeat_penalty: 1.05
+  # Bağlam penceresi — RAM'i doğrudan etkiler. 16 GB RAM'li makinelerde 4096
+  # güvenli değerdir; 8192 ancak ~10 GB boş RAM varken kullanılmalıdır.
+  # Yetersiz bellek hatası alırsanız ilk düşürülecek parametre budur.
+  num_ctx: 4096
+  num_predict: 700                         # Maks. üretilecek token
+  num_thread: 0                            # 0 = otomatik (fiziksel çekirdek sayısı)
+  # GPU katman sayısı:
+  #   0    = tamamen CPU (GPU'yu hiç kullanma). "CUDA_Host buffer" / pinned memory
+  #          hatası alıyorsanız veya VRAM yetersizse bunu kullanın.
+  #   null = Ollama otomatik karar versin (GPU varsa kısmen ona yükler)
+  #   20   = ilk 20 katmanı GPU'ya yükle (kısmi offload; 6 GB VRAM için makul)
+  num_gpu: 0
+  seed: 42                                 # Tekrar üretilebilirlik
+  timeout_s: 600
+  keep_alive: "30m"                        # Model RAM'de kalsın, her soruda yeniden yüklenmesin
+  stop:
+    - "<|im_end|>"
+
+retrieval:
+  collection_name: "belge_koleksiyonu"
+  distance: "cosine"
+  # Sözleşme/mevzuat metinlerinde parça boyutu KÜÇÜK olmalı: 900 karakterde
+  # "9.2 belge vermeme cezası" ile "9.3 maaş gecikme cezası" aynı parçaya
+  # giriyor ve model yanlış maddeyi okuyabiliyor (gerçek testte oldu).
+  # 550 fazla dar kaldı: taranmış sayfalarda uzun bir madde ortadan ikiye
+  # bölünüp cevabın yarısı kayboldu. 700 + %21 örtüşme, madde bütünlüğünü
+  # korurken iki maddeyi aynı parçaya sokmuyor.
+  chunk_size: 700              # karakter
+  chunk_overlap: 150           # karakter (~%21)
+  # Parçalar önce MADDE / 9.2 gibi alt madde sınırlarında bölünür; ancak
+  # ondan sonra karakter bazlı bölücü devreye girer. Böylece her madde
+  # kendi parçasında kalır. Düz metinlerde etkisi yoktur.
+  article_aware_split: true
+  min_chunk_chars: 80          # Bundan kısa parçalar atılır (başlık artıkları)
+  # CSV/XLSX tablolarında kaç satır bir parçaya girsin?
+  #   1 = her satır ayrı parça (ÖNERİLEN). "2021'in 5. ayı" sorulduğunda modelin
+  #       komşu satırı (6. ay) okumasını engeller. Tablo sorgularında doğruluk
+  #       için en kritik ayar budur.
+  #   5-10 = çok büyük tablolarda parça sayısını azaltır, doğruluk düşer.
+  table_rows_per_chunk: 1
+  # PDF içindeki tablo satırlarını da ayrı parçalara böl.
+  # PDF'ler tabloyu düz metin satırı olarak verir; sayfayı tek parça bırakırsak
+  # model komşu satırı okuyup yanlış tutar verebilir. Bir sayfada 3+ "tablo
+  # satırı" (tarih/dönem + sayı içeren satır) bulunursa sayfa otomatik bölünür.
+  # Tablosuz belgelerde hiçbir etkisi yoktur.
+  pdf_split_table_rows: true
+  # ---- HİBRİT ARAMA ----
+  # Vektör (anlamsal) arama tek başına, nadir özel isimleri ve birebir
+  # ifadeleri ıskalayabilir: "ADL-2024/117 ... KDV hariç bedel" gibi bir
+  # soruda tüm sözleşme sayfaları anlamca benzer olduğu için doğru sayfa
+  # ilk sıralara giremeyebilir. BM25 kelime araması tam bunu yakalar.
+  # İkisi RRF (sıra tabanlı birleştirme) ile harmanlanır.
+  hybrid_enabled: true
+  bm25_weight: 1.0             # BM25 sıralamasının ağırlığı
+  dense_weight: 1.0            # Vektör sıralamasının ağırlığı
+  rrf_k: 60                    # RRF sabiti (standart değer 60)
+  # Kosinüs benzerliği eşiği geçilemese bile, sorunun anlamlı kelimelerinin
+  # bu oranı parçada geçiyorsa parça "ilgili" sayılır. Özel isim içeren
+  # sorularda yanlış ret'leri engeller.
+  min_keyword_coverage: 0.5
+  # Birleşik skor, kelime kapsamıyla ölçeklenir: skor * (1 + boost * kapsam).
+  # 0 = kapalı (saf sıra birleştirme). Yükseltmek, sorunun kelimelerini
+  # birebir içeren parçaları öne çıkarır — özel isimli sorularda belirleyici.
+  coverage_boost: 1.0
+  top_k: 20                    # 1. aşama: her yöntemden çekilecek aday sayısı
+  final_k: 4                   # LLM'e verilecek nihai parça sayısı (num_ctx 4096 ile uyumlu)
+  min_similarity: 0.35         # Bu eşiğin altında hiçbir parça yoksa -> "bilgi bulunamadı"
+  strong_similarity: 0.55      # Bu eşiğin üstünde en az 1 parça yoksa uyarı bayrağı
+  mmr_enabled: true            # Çeşitlilik: aynı sayfadan 5 parça gelmesini engeller
+  mmr_lambda: 0.6              # 1.0 = sadece benzerlik, 0.0 = sadece çeşitlilik
+  max_chunks_per_document: 3   # Tek belgenin cevabı domine etmesini engeller
+  # Prompt'a girecek toplam bağlam karakter sınırı.
+  # num_ctx ile uyumlu olmalı: Türkçe'de ~2.7 karakter = 1 token.
+  #   5500 karakter (~2000 token) + sistem promptu (~650) + üretim (700) ≈ 3400 < 4096 ✔
+  # num_ctx'i 8192'ye çıkarırsanız burayı 9000'e yükseltebilirsiniz.
+  context_char_budget: 5500
+
+ocr:
+  # Taranmış (görüntü) PDF'ler için OCR. Yalnızca METİN KATMANI OLMAYAN
+  # sayfalara uygulanır; dijital sayfalar hızlı yoldan okunmaya devam eder.
+  enabled: true
+  language: "tur+eng"          # Tesseract dil kodları
+  # 300 dpi, tablolu taramalarda belirgin fark yaratır. 220'de birim fiyat
+  # cetvelleri bozuk okundu ("Briit asgari ticretin", "9480 fazlası").
+  # Bedeli: sayfa başına OCR süresi yaklaşık iki katına çıkar.
+  dpi: 300
+  # Görüntü ön işleme: gri tonlama + otomatik kontrast + hafif keskinleştirme.
+  # Soluk fotokopilerde OCR doğruluğunu belirgin artırır.
+  preprocess: true
+  # Tablolu sayfalarda sütunların ayrılabilmesi için kelime arası boşluklar
+  # korunur (Tesseract preserve_interword_spaces).
+  preserve_spaces: true
+  min_chars_per_page: 60       # Bu değerin altındaki sayfa "taranmış" sayılır
+  # Tesseract PATH'te değilse tam yolu yazın. Windows'ta genellikle:
+  #   "C:/Program Files/Tesseract-OCR/tesseract.exe"
+  tesseract_cmd: ""            # Boş bırakın: PATH ve bilinen kurulum konumları
+                               # otomatik taranır. Yalnızca Tesseract standart
+                               # dışı bir yere kuruluysa tam yol yazın, ör:
+                               # "C:/Program Files/Tesseract-OCR/tesseract.exe"
+
+reranker:
+  enabled: false               # CPU-only'de varsayılan KAPALI (yavaşlatır ~3-8 sn)
+  model_path: "models/bge-reranker-v2-m3"
+  top_n: 5
+  batch_size: 4
+
+guardrail:
+  # Belgelerde cevap yoksa döndürülecek TEK standart metin.
+  refusal_text: "Bu konu hakkında yüklenen belgelerde bilgi bulunmamaktadır."
+  # Cevapta hiç [K#] atıfı yoksa cevabı reddet ve refusal_text döndür.
+  require_citation: true
+  # Cevaptaki atıf numarası bağlamda yoksa (uydurma kaynak) cevabı reddet.
+  validate_citation_ids: true
+  # CÜMLE BAZINDA ATIF: sayı içeren veya uzun her cümlede [K#] olmalı.
+  # Modelin atıflı doğru cümlelerin arkasına atıfsız bir "özet/sonuç" cümlesi
+  # ekleyip orada bilgi uydurmasını engeller. Gerçek bir testte model
+  # "otuziki aydır [K2]" yazdıktan sonra "toplam 30 aydır" dedi; bu kural
+  # olmadan denetimden geçiyordu.
+  require_citation_per_sentence: true
+  # Atıfsız cümle bulununca ne yapılsın?
+  #   strip  = yalnızca o cümleyi yanıttan ÇIKAR, gerisini göster (ÖNERİLEN)
+  #   reject = tüm yanıtı reddet (çok katı; yanlış ret oranını yükseltir)
+  # "strip" hem uydurma cümleyi eler hem doğru bilgiyi korur.
+  sentence_citation_action: "strip"
+  min_factual_sentence_len: 40   # bundan uzun cümleler de atıf ister
+  # SAYI DOĞRULAMA: yanıttaki her sayı kaynak metinlerde birebir geçmeli.
+  # Uydurulan veya modelin kendi kafasından hesapladığı sayıları yakalar.
+  # OCR'lı belgelerde nadiren yanlış ret'e yol açabilir; o durumda kapatın.
+  verify_numbers: true
+  # Modelin kendi genel bilgisini kullanmasını engelleyen ek talimatlar açık.
+  strict_mode: true

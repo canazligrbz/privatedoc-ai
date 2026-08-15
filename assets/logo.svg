@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Nötr uygulama işareti (marka içermez).
+  Katmanlı belge yığınını temsil eder. Kendi logonuzu kullanmak isterseniz
+  bu dosyanın üzerine yazın veya config.yaml -> app.logo_path değerini
+  kendi dosyanıza yönlendirin (PNG de olur).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40"
+     role="img" aria-label="Uygulama işareti">
+  <rect x="1" y="1" width="38" height="38" rx="11" fill="#EEF2F7" stroke="#DCE3EB"/>
+  <g fill="none" stroke="#41618C" stroke-width="1.9"
+     stroke-linejoin="round" stroke-linecap="round">
+    <path d="M20 8.5 30.5 14 20 19.5 9.5 14 20 8.5Z"/>
+    <path d="M9.5 20 20 25.5 30.5 20" opacity=".62"/>
+    <path d="M9.5 26 20 31.5 30.5 26" opacity=".34"/>
+  </g>
+</svg>

@@ -1,0 +1,54 @@
+# =====================================================================
+#  Bu dosya bir güvenlik denetimidir, kolaylık aracı değil.
+#  Sistem kurum içi belgelerle çalışmak üzere tasarlandı; aşağıdaki
+#  yolların hiçbiri versiyon kontrolüne girmemelidir.
+# =====================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- KURUMSAL VERİ — ASLA COMMIT EDİLMEZ ---
+# Kaynak belgeler: kullanıcının kendi dosyaları
+data/documents/*
+!data/documents/.gitkeep
+# Vektör indeksi: belge metinlerinin tamamını içerir, belge kadar hassastır
+data/vectordb/
+# Dosya adları ve özetleri
+data/ingest_manifest.json
+# Denetim günlüğü: gerçek sorular ve yanıtlar
+logs/
+*.jsonl
+
+# --- Model ağırlıkları (GB'larca; kaynağından indirilir) ---
+models/
+
+# --- Çevrimdışı transfer paketi ---
+offline_bundle/
+wheelhouse/
+
+# --- Değerlendirme çıktıları ---
+eval/sonuc*.json
+eval/rapor*.json
+eval/tarama*.json
+
+# --- Ortam / sırlar ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Editör ve sistem ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+~$*

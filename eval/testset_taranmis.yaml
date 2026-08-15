@@ -1,0 +1,116 @@
+# =====================================================================
+# TEST SETİ — YALNIZCA TARANMIŞ SÜRÜM (OCR maliyeti ölçümü)
+# ---------------------------------------------------------------------
+# ornek_belgeler/taranmis/depo_ekler_taranmis.pdf içinde, dijital
+# sözleşmenin 7., 8. ve 13. sayfaları TARANMIŞ GÖRÜNTÜ olarak yer alır:
+#     sayfa 7  → Aylık hakediş planı tablosu
+#     sayfa 8  → Personel yapısı ve ücret oranları tablosu
+#     sayfa 13 → Cezai şartlar (birbirine benzeyen 4 madde)
+#
+# DENEY TASARIMI: Yalnızca bu dosya indekslenir. Böylece aynı bilginin
+# temiz hâli indekste bulunmaz ve ölçülen şey saf OCR etkisidir.
+#
+#     python -m src.ingest --rebuild --path ornek_belgeler/taranmis
+#     python eval/run_eval.py --testset eval/testset_taranmis.yaml
+#
+# KARŞILAŞTIRMA: Aşağıdaki 11 sorunun dijital sürümdeki karşılıkları
+# testset_depo.yaml içinde vardır. İki koşunun skoru arasındaki fark,
+# taramanın doğruluğa maliyetidir.
+#
+# Geri dönüş:  python -m src.ingest --rebuild --path ornek_belgeler/dijital
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# A. HAKEDİŞ TABLOSU (taranmış sayfa 7) — satır bazlı okuma
+# ---------------------------------------------------------------------
+
+- question: "2024 yılının 6. ayında öngörülen hakediş tutarı ve personel sayısı nedir?"
+  type: answerable
+  expect_any: ["1.548.750", "1548750"]
+  forbid_keywords: ["1.372.500", "1.455.200"]
+  note: "Doğru: 1.548.750,00 TL · 38 personel. OCR rakamları bozarsa burada görülür."
+
+- question: "Kasım 2024 döneminin açıklaması ve tutarı nedir?"
+  type: answerable
+  expect_any: ["1.455.200", "1455200", "envanter"]
+  note: "Doğru: Envanter sayım dönemi, 1.455.200,00 TL, 36 personel"
+
+- question: "Mart 2024 döneminde kaç personel çalışacaktır?"
+  type: answerable
+  expect_any: ["28"]
+  note: "Doğru: 03/2024 → Kuruluş ve devir dönemi, 28 personel"
+
+# ---------------------------------------------------------------------
+# B. PERSONEL VE ÜCRET TABLOSU (taranmış sayfa 8)
+# ---------------------------------------------------------------------
+
+- question: "Sözleşme kapsamında toplam kaç kişi çalışacaktır?"
+  type: answerable
+  expect_any: ["34"]
+
+- question: "Forklift Operatörü unvanına asgari ücretin yüzde kaç fazlası ödenecektir?"
+  type: answerable
+  expect_any: ["55"]
+  forbid_keywords: ["145 fazlası", "95 fazlası", "30 fazlası"]
+  note: "Doğru: %55. Komşu satırlar 145, 95, 75, 30 — OCR karıştırırsa yakalanır."
+
+- question: "Depo Müdürüne asgari ücretin yüzde kaç fazlası ödenecektir?"
+  type: answerable
+  expect_any: ["145"]
+  forbid_keywords: ["55 fazlası"]
+
+- question: "Kaç adet Depo Görevlisi çalıştırılacaktır?"
+  type: answerable
+  expect_any: ["16"]
+
+- question: "Personel ücretleri en geç ayın kaçıncı gününe kadar yatırılmalıdır?"
+  type: answerable
+  expect_any: ["7"]
+  note: "Doğru: izleyen ayın 7'nci günü (madde 6.3)"
+
+# ---------------------------------------------------------------------
+# C. CEZAİ ŞARTLAR (taranmış sayfa 13) — benzer maddeleri ayırt etme
+# ---------------------------------------------------------------------
+
+- question: "Yüklenici çalışan ücretlerini zamanında yatırmazsa ceza oranı nedir?"
+  type: answerable
+  expect_any: ["yüzbinde üç", "0,00003"]
+  forbid_keywords: ["onbinde beş"]
+  note: "Doğru: yüzbinde üç (10.3). Üstündeki 10.2 onbinde beş diyor."
+
+- question: "Gizlilik ihlali hâlinde uygulanacak ceza nedir?"
+  type: answerable
+  expect_any: ["2"]
+  forbid_keywords: ["onbinde beş", "yüzbinde üç"]
+  note: "Doğru: sözleşme bedelinin %2'si"
+
+- question: "Onaysız personel değişikliği yapılırsa personel başına ne kadar ceza uygulanır?"
+  type: answerable
+  expect_any: ["15.000", "15000"]
+  note: "Doğru: 15.000,00 TL. Bozuk OCR'da bu tutar dağılabilir."
+
+# ---------------------------------------------------------------------
+# D. REDDEDİLMESİ ZORUNLU
+# Bu bilgiler sözleşmede VAR ama taranmış sürüme dahil edilen 3 sayfada
+# YOK. İndekste bulunmayan bilgiye cevap üretilmemelidir.
+# ---------------------------------------------------------------------
+
+- question: "Sözleşmenin KDV hariç toplam bedeli nedir?"
+  type: must_refuse
+  note: "Sayfa 6'da; taranmış sürüme dahil değil."
+
+- question: "Personele ödenecek günlük yemek bedeli ne kadardır?"
+  type: must_refuse
+  note: "Sayfa 16'da; taranmış sürüme dahil değil."
+
+- question: "Üçüncü vardiya saat kaçta başlar?"
+  type: must_refuse
+  note: "Sayfa 9'da; taranmış sürüme dahil değil."
+
+- question: "Uyuşmazlık hâlinde hangi mahkemeler yetkilidir?"
+  type: must_refuse
+  note: "Sayfa 18'de; taranmış sürüme dahil değil."
+
+- question: "Deponun aylık elektrik tüketimi kaç kWh'tir?"
+  type: must_refuse
+  note: "Hiçbir sayfada yok."
