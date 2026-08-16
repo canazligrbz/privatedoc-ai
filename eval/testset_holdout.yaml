@@ -1,0 +1,221 @@
+# =====================================================================
+#  AYRILMIŞ (HELD-OUT) TEST SETİ  —  ornek_belgeler/dijital/depo_sozlesmesi.pdf
+# =====================================================================
+#
+#  ⚠  BU SET GELİŞTİRME SIRASINDA ÇALIŞTIRILMAZ.
+#
+#  NEDEN VAR?
+#  testset_depo.yaml ile ölçülen skor (%50 → %96,6), aynı 29 soruya
+#  bakılarak yapılan düzeltmelerle elde edildi. Bu bir GENELLEME ölçümü
+#  değildir; geliştirmeyi yöneten setin skorudur. Parametreler, eşikler
+#  ve guardrail kuralları o sorulardaki hatalara göre şekillendi — yani
+#  o set artık "sınav" değil, "ders kitabı"dır.
+#
+#  Bu dosya hiç görülmemiş sorular içerir. Geliştirme bittiğinde TEK SEFER
+#  çalıştırılır ve iki skor yan yana raporlanır:
+#
+#      Geliştirme seti (29 soru):  %96,6   ← parametreler buna göre ayarlandı
+#      Ayrılmış set    (29 soru):  %XX,X   ← hiç görülmedi
+#
+#  Aradaki fark ne çıkarsa çıksın bilgi kazancıdır. Küçükse sistem gerçekten
+#  genelliyor demektir. Büyükse test setine aşırı uyum vardır ve bunu kendin
+#  tespit etmiş olursun — sorulmasını beklemekten çok daha güçlü bir konum.
+#
+#  KURALLAR
+#   1. Bu set çalıştırıldıktan SONRA, sonuçlarına bakarak parametre/kural
+#      değiştirilirse set "yanmış" olur ve artık ayrılmış sayılmaz.
+#      Değiştirmek gerekirse: değişikliği testset_depo.yaml üzerinde yap,
+#      sonra YENİ bir ayrılmış set yaz.
+#   2. Sonuç raporlanırken hangi setin hangi rolde olduğu mutlaka belirtilir.
+#
+#  Çalıştırma (kilitlidir, açık onay ister):
+#      python eval/run_eval.py --testset eval/testset_holdout.yaml --holdout
+#
+#  TASARIM: Soru dağılımı ve zorluk kategorileri testset_depo.yaml ile
+#  aynıdır (20 cevaplanabilir · 5 reddedilmeli · 4 tuzak), ancak sorular
+#  belgenin geliştirme setinde HİÇ KULLANILMAMIŞ olgularına dayanır.
+#  Böylece karşılaştırma adil olur: değişen tek şey soruların görülmüş
+#  olup olmamasıdır.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# A. TEK CÜMLELİK OLGU — düz metinden okunur
+# ---------------------------------------------------------------------
+
+- question: "Merkez Deponun kapalı alanı kaç metrekaredir?"
+  type: answerable
+  expect_keywords: ["18.400"]
+  note: "Doğru: 18.400 m² (BÖLÜM 1, tanımlar)"
+
+- question: "Kritik stok seviyesi kaç palet olarak tanımlanmıştır?"
+  type: answerable
+  expect_any: ["500 palet", "500"]
+  note: "Doğru: asgari 500 palet (BÖLÜM 1, tanımlar)"
+
+- question: "İdare, hakediş belgesini teslim aldıktan sonra kaç gün içinde inceler?"
+  type: answerable
+  expect_any: ["15"]
+  forbid_keywords: ["30 gün içinde inceler"]
+  note: "Doğru: 15 gün inceleme, ardından 30 gün içinde ödeme (MADDE 5.3)"
+
+- question: "Fiyat farkı hesaplanırken ÜFE oranının yüzde kaçı uygulanır?"
+  type: answerable
+  expect_any: ["80"]
+  note: "Doğru: yurt içi ÜFE oranının %80'i (MADDE 5.6)"
+
+- question: "Gizlilik yükümlülüğü sözleşme sona erdikten sonra kaç yıl devam eder?"
+  type: answerable
+  expect_any: ["5 yıl", "5 (beş) yıl", "beş yıl"]
+  note: "Doğru: 5 yıl (MADDE 14.1)"
+
+- question: "İş kazası hâlinde kaç saat içinde yazılı rapor sunulmalıdır?"
+  type: answerable
+  expect_any: ["24 saat"]
+  note: "Doğru: 24 saat (MADDE 12.5)"
+
+- question: "Personele işe başlamadan önce en az kaç saat İSG eğitimi verilir?"
+  type: answerable
+  expect_any: ["16 saat"]
+  note: "Doğru: en az 16 saat (MADDE 12.3)"
+
+- question: "Yüklenici, ekipman arızasını kaç saat içinde İdare'ye bildirmek zorundadır?"
+  type: answerable
+  expect_any: ["2 saat"]
+  note: "Doğru: 2 saat (MADDE 8.3)"
+
+# ---------------------------------------------------------------------
+# B. TABLO SATIRI OKUMA — komşu satıra kaymamalı
+# ---------------------------------------------------------------------
+
+- question: "04/2024 döneminde öngörülen hakediş tutarı nedir?"
+  type: answerable
+  expect_keywords: ["1.372.500"]
+  forbid_keywords: ["1.185.400", "1.548.750"]
+  note: "Doğru: 1.372.500,00 TL. Üstündeki satır 1.185.400, altındakiler 1.548.750."
+
+- question: "Aralık 2024 döneminin açıklaması nedir?"
+  type: answerable
+  expect_any: ["yıl sonu", "kapanış"]
+  forbid_keywords: ["envanter sayım"]
+  note: >
+    Doğru: 12/2024 → Yıl sonu kapanış. Ay adı ↔ ay numarası eşleştirmesini
+    ölçer; hemen üstündeki 11/2024 satırı "Envanter sayım dönemi" diyor.
+
+- question: "Vardiya Amiri unvanında kaç kişi çalışacak ve ücret oranı nedir?"
+  type: answerable
+  expect_keywords: ["3", "95"]
+  forbid_keywords: ["145 fazlası", "75 fazlası"]
+  note: "Doğru: 3 kişi, asgari ücretin %95 fazlası (MADDE 6.1)"
+
+- question: "İSG Uzmanına asgari ücretin yüzde kaç fazlası ödenir?"
+  type: answerable
+  expect_keywords: ["110"]
+  forbid_keywords: ["145 fazlası", "95 fazlası", "40 fazlası"]
+  note: "Doğru: %110. Tablonun alt sıralarında; komşuları 30 ve 40."
+
+- question: "JN-400 kodlu ekipmanın garanti süresi ve yıllık bakım bedeli nedir?"
+  type: answerable
+  expect_keywords: ["60", "128.500"]
+  forbid_keywords: ["94.800", "9.350"]
+  note: "Doğru: Jeneratör 400 kVA, 60 ay garanti, 128.500,00 TL"
+
+- question: "Birinci vardiyada kaç personel çalışır ve ara dinlenme süresi ne kadardır?"
+  type: answerable
+  expect_keywords: ["16", "45"]
+  forbid_keywords: ["60 dakika"]
+  note: "Doğru: 16 personel, 45 dakika (08:00–16:00). 3. vardiya 60 dakika."
+
+- question: "Kimyasal deposunda sağlanması gereken aydınlatma değeri kaç lux'tür?"
+  type: answerable
+  expect_keywords: ["300"]
+  forbid_keywords: ["200 lux", "150 lux", "500 lux"]
+  note: "Doğru: 300 lux (EK-1). Komşu satırlar 200, 150, 250, 500."
+
+# ---------------------------------------------------------------------
+# C. BİRBİRİNE BENZEYEN MADDELERİ AYIRT ETME
+# ---------------------------------------------------------------------
+
+- question: "Yüklenici, işin başlangıcında sunması gereken belgeleri süresinde vermezse ceza oranı nedir?"
+  type: answerable
+  expect_any: ["onbinde beş", "0,0005"]
+  forbid_keywords: ["yüzbinde üç"]
+  note: >
+    Doğru: onbinde beş (MADDE 10.2). Hemen altındaki 10.3 maddesi ÜCRET
+    gecikmesi için yüzbinde üç diyor. Geliştirme setindeki sorunun aynası.
+
+- question: "Toplam ceza tutarı sözleşme bedelinin yüzde kaçını aştığında İdare sözleşmeyi tek taraflı feshedebilir?"
+  type: answerable
+  expect_any: ["%10", "yüzde 10"]
+  forbid_keywords: ["yüzde ikisi", "%2'si"]
+  note: "Doğru: %10 (MADDE 10.6)"
+
+- question: "Jeneratörün bakım periyodu nedir?"
+  type: answerable
+  expect_any: ["6 ayda bir", "6 ay"]
+  forbid_keywords: ["500 çalışma", "250 çalışma", "300 çalışma"]
+  note: "Doğru: 6 ayda bir (MADDE 9.1). Aynı tabloda saat bazlı periyotlar var."
+
+# ---------------------------------------------------------------------
+# D. ŞEMA / AKIŞ OKUMA
+# ---------------------------------------------------------------------
+
+- question: "Sevkiyat iş akışında stok kontrolünden kim sorumludur?"
+  type: answerable
+  expect_keywords: ["vardiya amiri"]
+  forbid_keywords: ["tekniker", "depo görevlisi"]
+  note: "Doğru: ADIM 2 STOK KONTROLÜ → Vardiya Amiri (ŞEMA 1)"
+
+# ---------------------------------------------------------------------
+# E. OLUMSUZ / KAPSAM DIŞI İFADE — "yok" bilgisini doğru aktarma
+# ---------------------------------------------------------------------
+
+- question: "Emtia sigortasını taraflardan hangisi yaptırır?"
+  type: answerable
+  expect_keywords: ["idare"]
+  forbid_keywords: ["yüklenici yaptırır", "yüklenici tarafından yaptırılır"]
+  note: "Doğru: İDARE yaptırır; YÜKLENİCİ'nin yükümlülüğü yoktur (MADDE 11.4)"
+
+# ---------------------------------------------------------------------
+# F. REDDEDİLMESİ ZORUNLU — belgede kesinlikle yok
+# ---------------------------------------------------------------------
+
+- question: "Depoda kaç adet yangın söndürme tüpü bulunmaktadır?"
+  type: must_refuse
+  note: "Belgede yangın SİSTEMİ bakım periyodu var, tüp sayısı yok."
+
+- question: "Yüklenici firmanın ticaret sicil numarası nedir?"
+  type: must_refuse
+
+- question: "Sözleşmenin İngilizce çevirisi hangi tarihte hazırlanmıştır?"
+  type: must_refuse
+
+- question: "Personele ödenecek aylık yol yardımı tutarı kaç TL'dir?"
+  type: must_refuse
+  note: "Servis aracı sağlanıyor ama nakdî yol yardımı tutarı belgede yok."
+
+- question: "Depoda çalışan personelin ortalama yaşı kaçtır?"
+  type: must_refuse
+
+# ---------------------------------------------------------------------
+# G. TUZAK — kullanıcının yanlış varsayımını onaylamamalı
+# ---------------------------------------------------------------------
+
+- question: "Sözleşme bedelinin KDV dahil olduğu doğru mu?"
+  type: trap
+  forbid_keywords: ["kdv dahildir", "kdv dahil olduğu doğru", "evet, kdv dahil"]
+  note: "Bedel KDV HARİÇTİR (MADDE 5.1 ve 1.2)."
+
+- question: "Yıllık izinler Haziran-Ağustos döneminde toplu olarak kullandırılır mı?"
+  type: trap
+  forbid_keywords: ["toplu izin kullandırılır", "evet, kullandırılır"]
+  note: "Haziran–Ağustos döneminde toplu izin KULLANDIRILMAZ (MADDE 7.5)."
+
+- question: "Jeneratörün garanti süresinin 24 ay olduğu doğru mu?"
+  type: trap
+  forbid_keywords: ["garanti süresi 24 ay", "evet, 24 ay"]
+  note: "Jeneratörün garantisi 60 aydır. 24 ay, akülü forklift ve kompresöre ait."
+
+- question: "Deponun çatı onarımı Yüklenicinin sorumluluğunda mıdır?"
+  type: trap
+  forbid_keywords: ["yüklenici sorumludur", "yüklenicinin sorumluluğundadır"]
+  note: "Çatı, cephe ve altyapı onarımları İDARE sorumluluğundadır (MADDE 3.2)."

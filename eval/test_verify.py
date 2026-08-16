@@ -1,6 +1,6 @@
 """
-GUARDRAIL BİRİM TESTLERİ — src/verify.py
-=========================================
+HIZLI BİRİM TESTLERİ — guardrail (src/verify.py) + belge okuma (src/loaders.py)
+================================================================================
 
 Buradaki her durum GERÇEK bir hatadan doğdu. Değerlendirme koşuları
 (run_eval.py) LLM gerektirir ve ~15 dakika sürer; bu testler saniyeler
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -119,10 +120,55 @@ DURUMLAR = [
 ]
 
 
-def main() -> int:
-    gecen = 0
-    print(f"{len(DURUMLAR)} guardrail birim testi çalıştırılıyor...\n")
+# =====================================================================
+#  BELGE OKUMA — üstbilgi/altbilgi (boilerplate) ayıklama
+# ---------------------------------------------------------------------
+#  Tekrarlayan sayfa altbilgisi indekse çöp parça olarak giriyordu ve
+#  sözleşme numarası içerdiği için aramada ilk sıralara çıkabiliyordu.
+#  Ayıklama KONUMA duyarlı olmalı: aynı ifade sayfa ortasında gerçek
+#  içerik olabilir.
+# =====================================================================
 
+_SAYFALAR = [
+    "ADL-2024/117 — Sözleşme    Sayfa 1\nMADDE 1 — TARAFLAR\n1.1. Taraflar şunlardır.",
+    "ADL-2024/117 — Sözleşme    Sayfa 2\nMADDE 2 — KONU\n2.1. Konu depolamadır.",
+    "ADL-2024/117 — Sözleşme    Sayfa 3\nMADDE 3 — BEDEL\n3.1. Bedel 100 TL'dir.",
+    "ADL-2024/117 — Sözleşme    Sayfa 4\nMADDE 4 — SÜRE\n4.1. Süre 18 aydır.",
+]
+
+
+def _boilerplate_testleri() -> List[Tuple[str, bool]]:
+    from src.loaders import _detect_boilerplate, _strip_boilerplate
+
+    bp = _detect_boilerplate(_SAYFALAR)
+    temiz = [_strip_boilerplate(s, bp) for s in _SAYFALAR]
+
+    # Sayfa ortasında geçen aynı ifade korunmalı
+    orta = "MADDE 5 — ATIF\n5.1. ADL-2024/117 — Sözleşme    Sayfa 9 ibaresi burada içeriktir.\n5.2. Devam."
+    orta_temiz = _strip_boilerplate(orta, bp)
+
+    # Az sayfalı belgede tespit yapılmamalı (güvenilir değil)
+    az = _detect_boilerplate(_SAYFALAR[:2])
+
+    return [
+        ("altbilgi tespit edildi", len(bp) == 1),
+        ("altbilgi tüm sayfalardan atıldı",
+         all("Sayfa" not in t.splitlines()[0] for t in temiz)),
+        ("gerçek içerik korundu",
+         all(("MADDE" in t and "1." in t) or "MADDE" in t for t in temiz)),
+        ("🔒 sayfa ORTASINDAKİ aynı ifade korundu",
+         "ibaresi burada içeriktir" in orta_temiz),
+        ("🔒 2 sayfalık belgede tespit yapılmadı", az == set()),
+    ]
+
+
+def main() -> int:
+    bp_testleri = _boilerplate_testleri()
+    gecen = 0
+    toplam = len(DURUMLAR) + len(bp_testleri)
+    print(f"{toplam} birim testi çalıştırılıyor...\n")
+
+    print("-- guardrail (src/verify.py) " + "-" * 34)
     for ad, ham, kaynak, soru, bek_ok, bek_icerik in DURUMLAR:
         ok, sebep, ayrinti, temiz = check(ham, kaynak, question=soru)
         iyi = (ok == bek_ok) and (bek_icerik is None or bek_icerik in temiz)
@@ -135,10 +181,15 @@ def main() -> int:
             if ayrinti["removed"]:
                 print(f"     atılan   : {ayrinti['removed']}")
 
+    print("\n-- belge okuma (src/loaders.py) " + "-" * 31)
+    for ad, sonuc in bp_testleri:
+        gecen += bool(sonuc)
+        print(f" {'✔' if sonuc else '✖'} {ad}")
+
     print("\n" + "=" * 62)
-    print(f"  {gecen}/{len(DURUMLAR)} test geçti")
+    print(f"  {gecen}/{toplam} test geçti")
     print("=" * 62)
-    return 0 if gecen == len(DURUMLAR) else 1
+    return 0 if gecen == toplam else 1
 
 
 if __name__ == "__main__":

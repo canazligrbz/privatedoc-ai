@@ -116,24 +116,68 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 **Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only (GPU yok), depodaki `config.yaml` varsayılanları
 
-| Metrik | Dijital belge | Taranmış belge¹ | Hedef |
-|---|---|---|---|
-| Soru sayısı | 29 | 16 | — |
-| **Genel başarı** | **%96,6** | %62,5 | ≥ %85 |
-| **Ret doğruluğu** | **%100** | **%100** | ≥ %95 |
-| **Yanlış ret** | **%0,0** | %36,4 | ≤ %10 |
-| **Kaynaklı yanıt** | **%100** | **%100** | %100 |
-| Gecikme (medyan) | 47,0 sn | 22,9 sn | ≤ 60 sn |
-| Gecikme (p95) | 56,5 sn | 36,0 sn | — |
+| Metrik | Geliştirme seti | **Ayrılmış set** | Taranmış¹ | Hedef |
+|---|---|---|---|---|
+| Soru sayısı | 29 | 29 | 16 | — |
+| Sorular görüldü mü? | evet, ayar buna göre | **hayır** | evet | — |
+| **Genel başarı** | %96,6 | **%93,1** | %62,5 | ≥ %85 |
+| **Ret doğruluğu** | %100 | **%100** | %100 | ≥ %95 |
+| **Yanlış ret** | %5,0 | %10,0 | %36,4 | ≤ %10 |
+| **Kaynaklı yanıt** | %100 | **%100** | %100 | %100 |
+| Gecikme (medyan) | 25,4 sn | 21,8 sn | 22,9 sn | ≤ 60 sn |
+| Gecikme (p95) | 30,4 sn | 28,3 sn | 36,0 sn | — |
 
-¹ Taranmış sürüm ölçümü, aşağıdaki guardrail düzeltmelerinden **önce** alınmıştır; o koşudaki altı hatanın üçü OCR'dan değil, giderilen guardrail kusurundan kaynaklanıyordu. Gerçek OCR maliyeti yeniden ölçülecektir.
+**Genelleme farkı: 3,5 puan.** Hiç görülmemiş 29 soruda skor %96,6'dan %93,1'e düştü. Bu küçük fark, sistemin test setine ezberlemediğini gösterir.
+
+Daha önemlisi: **ret doğruluğu her iki sette de %100.** Ayrılmış setteki 5 "reddedilmesi zorunlu" sorunun tamamı ve 4 tuzak sorunun tamamı doğru davranışla sonuçlandı. Sistemin var oluş amacı olan davranış — bilmediğinde uydurmamak — görülmemiş sorulara tam olarak aktarılıyor.
+
+Ayrılmış setteki iki hatanın **ikisi de aynı sınıftan** ve geliştirme setindeki tek hatayla aynı: doğru kaynak getirilmiş, model onu kullanmayı reddetmiş.
+
+| # | Soru | Getirilen kaynak | Model |
+|---|---|---|---|
+| 10 | "Aralık 2024 döneminin açıklaması nedir?" | `12/2024 Yıl sonu kapanış 36 1.455.200,00` (1. sırada) | reddetti |
+| 2 | "Kritik stok seviyesi kaç palet?" | `KRİTİK STOK Asgari 500 palet altına düşen ürün seviyesi` (1. sırada) | reddetti |
+
+10. soru, aşağıda belgelenen **bilinen sınırın** ta kendisidir; ayrılmış sette de görülmesi, bunun tek bir soruya özgü bir tuhaflık değil gerçek bir zayıflık olduğunu doğrular. 2. soru aynı ailenin yeni bir örneğidir: getirme çalışıyor, üretim aşırı temkinli davranıyor.
+
+Sistemin kalan zayıflığı **tek bir yerde toplanmış durumda: getirme değil, üretim.** Üç sette de aynı imza görülüyor — bu, zayıflığın rastgele değil yapısal olduğunu ve dolayısıyla hedeflenebilir olduğunu gösterir.
+
+> **Ayrılmış set artık harcanmıştır.** Tek seferlik açıldı ve sonuçları raporlandı. Buradan sonra yapılacak iyileştirmeler geliştirme seti üzerinde yürütülmeli, genelleme yeniden ölçülecekse **yeni** bir ayrılmış set yazılmalıdır. Bu setin sonuçlarına bakarak parametre ayarlamak, onu ikinci bir geliştirme setine dönüştürür.
+
+¹ Taranmış sürüm ölçümü, guardrail düzeltmelerinden **önce** alınmıştır; o koşudaki altı hatanın üçü OCR'dan değil, sonradan giderilen guardrail kusurundan kaynaklanıyordu. Gerçek OCR maliyeti yeniden ölçülecektir.
 
 > **En kritik satır ret doğruluğudur.** Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır. Geliştirme boyunca bu metrik, bozuk OCR metni üzerinde bile hiç %100'ün altına düşmedi — guardrail katmanları veri kalitesinden bağımsız çalışıyor.
+
+### Ölçüm metodolojisi — geliştirme seti ve ayrılmış set
+
+Yukarıdaki **%96,6**, `testset_depo.yaml` üzerinde ölçüldü. Bu setle yapılan ilerlemenin (%50 → %96,6) tamamı, aynı 29 soruya bakılarak yapılan düzeltmelerle elde edildi. Eşikler, guardrail kuralları ve parametreler o sorulardaki hatalara göre şekillendi.
+
+Bu nedenle **o skor bir genelleme ölçümü değildir.** Geliştirmeyi yöneten setin skorudur; makine öğrenmesindeki karşılığı *test setine aşırı uyum*tur. Set artık sınav değil, ders kitabıdır.
+
+Bunu ölçmek için `eval/testset_holdout.yaml` yazıldı: aynı belgeye ait, **aynı dağılımda** (20 cevaplanabilir · 5 reddedilmeli · 4 tuzak) ve aynı zorluk kategorilerinde 29 yeni soru. Sorular, geliştirme setinin hiç dokunmadığı olgulara dayanır — böylece iki set arasında değişen tek şey, soruların görülmüş olup olmamasıdır.
+
+| | Geliştirme seti | Ayrılmış set |
+|---|---|---|
+| Dosya | `testset_depo.yaml` | `testset_holdout.yaml` |
+| Soru | 29 | 29 |
+| Rol | Parametreler buna göre ayarlandı | **Hiç görülmedi** |
+| Skor | %96,6 | **%93,1** |
+| Ret doğruluğu | %100 | **%100** |
+
+Ayrılmış setin tüm değeri görülmemiş olmasından gelir; bir kez bakılıp sonucuna göre ayar yapıldığında "yanar" ve genelleme ölçme özelliğini kaybeder. Bu disiplin hafızaya bırakılmadı, **koda gömüldü** — `run_eval.py` dosya adında `holdout` geçen bir seti açık onay olmadan çalıştırmaz ve bu set üzerinde parametre taramasına hiç izin vermez:
+
+```bash
+$ python eval/run_eval.py --testset eval/testset_holdout.yaml
+  AYRILMIŞ TEST SETİ — KİLİTLİ
+  testset_holdout.yaml, geliştirme sırasında çalıştırılmamalıdır.
+```
+
+Ölçüm yapıldı ve fark **3,5 puan** çıktı — sistem geneller durumda. Ayrılmış set bir kez açıldı, sonuçları yukarıda raporlandı ve **artık harcanmıştır**; genelleme yeniden ölçülecekse yeni bir set yazılmalıdır.
 
 Sonuçları kendiniz üretmek için:
 
 ```bash
-# Dijital
+# Dijital (geliştirme seti)
 python -m src.ingest --rebuild --path ornek_belgeler/dijital
 python eval/run_eval.py --testset eval/testset_depo.yaml
 
@@ -188,9 +232,9 @@ Tek fark `kaç` → `55`, yani cevabın kendisi. Ayıklayıcı bunu yankı sanı
 
 Bu mantığın gerilemesini önlemek için 15 birim testi yazıldı (`eval/test_verify.py`), LLM gerektirmez, saniyeler sürer. Bir kısmı düzeltmeleri, `🔒` işaretli olanlar guardrail'in **asıl görevini** korur: bir değişiklik uydurma sayı testlerini bozuyorsa o değişiklik yanlıştır.
 
-### Kalan tek hata
+### Bilinen sınır — ay adı ↔ ay numarası eşleştirmesi
 
-29 sorudan biri hâlâ geçmiyor ve bu artık guardrail değil, model hatasıdır:
+29 sorudan biri geçmiyor ve bu artık guardrail değil, **modelin sınırıdır**:
 
 ```
 soru  : "Kasım 2024 döneminin açıklaması ve tutarı nedir?"
@@ -198,7 +242,35 @@ K1    : "[TABLO SATIRI] ... 11/2024 Envanter sayım dönemi 36 1.455.200,00"   �
 model : "Kasım 2024 döneminin açıklaması ve tutarı belgede açık olarak verilmedi [K1][K3]."
 ```
 
-Arama görevini yapmış — BM25'teki `Kasım → 11` denkliği doğru satırı ilk sıraya taşımış. Model, elindeki satırla soruyu eşleştirmeyi reddediyor. Sistem prompt'undaki 10. kural bu denkliği zaten söylüyor, ancak 11 kuralın arasındaki genel bir kural 7B sınıfı bir model için yeterince güçlü değil. Planlanan çözüm, soruda ay adı geçtiğinde kullanıcı mesajına o soruya özel tek satırlık bir eşleştirme notu eklemektir (yeniden indeksleme gerektirmez).
+Arama görevini yapıyor: BM25'teki `Kasım → 11` denkliği doğru satırı ilk sıraya taşıyor. Model, elindeki satırla soruyu eşleştirmeyi reddediyor.
+
+Üç müdahale denendi, üçü de ölçüldü, **hiçbiri kazanç sağlamadı**:
+
+| # | Müdahale | Sonuç |
+|---|---|---|
+| 1 | Sistem promptuna genel kural (`Kasım=11`) | "belgede açık olarak verilmedi" |
+| 2 | Kullanıcı mesajına soruya özel NOT | "belirtilmemiş bir dönemdir" |
+| 3 | Eşleştirme kuralını denklik farkındalıklı sürümle değiştirmek | Düpedüz ret — biraz daha kötü |
+
+2. denemenin başarısızlığı öğretici: not, hemen üstündeki *"kullanacağın satırdaki değerin sorudakiyle **BİREBİR aynı** olduğunu doğrula"* kuralıyla çelişiyordu. "Kasım 2024" ile "11/2024" harfi harfine aynı olmadığı için model, kuralı doğru uygulayıp satırı eledi. **Çelişen iki talimattan daha kesin ifade edilmiş olan kazanıyor.** O "BİREBİR" kuralı da bir başka hatayı (tabloda komşu satıra kayma) düzeltmek için eklenmişti; iki gereksinim doğrudan çatışıyor.
+
+3. deneme **geri alındı**: kazanç göstermeyen bir değişikliği iki ayrı kod yolu pahasına tutmak doğru değil. Karar, dördüncü bir denemeye girişmek yerine sınırı belgelemek oldu — bu noktada tek bir soruya yapılan her ek müdahale, ölçtüğü setin skorunu iyileştirir ama genelleme hakkında bilgi vermez. Kod içinde de negatif bulgu olarak kayıtlıdır (`src/prompts.py`), aynı yol tekrar denenmesin diye.
+
+**Denenmemiş seçenek:** indeksleme sırasında tarih hücresini zenginleştirmek (`"11/2024"` → `"11/2024 (Kasım 2024)"`). Model eşleştirme yapmak zorunda kalmazdı. Kaynak metnini değiştirdiği için gösterim metnini indeks metninden ayırmak gerekir; tek bir soru için bu mimari değişiklik yapılmadı.
+
+### Yan bulgu — sayfa altbilgisi indekse giriyordu
+
+Bu soruyu incelerken görüldü: dört kaynak slotundan biri çöp bir parçaya gidiyordu.
+
+```
+[K3] "[TABLO SATIRI] Dönem Açıklama Personel Tutar (TL) ADL-2024/117 — Merkez Depo Hizmet Sözleşmesi"
+```
+
+Sayfa altbilgisi, tablo satırı olarak indekslenmişti. Sözleşme numarası içerdiği için BM25'te skor alıyor ve gerçek kaynakların yerini kapıyordu. Kurumsal belgelerin neredeyse tamamında her sayfada üstbilgi/altbilgi bulunduğu için bu, belgeye özel değil **genel** bir kusurdur.
+
+Çözüm sabit kalıp değil, **tekrar tespiti**: sayfaların %60'ından fazlasında ve sayfa başında/sonunda görünen satır boilerplate sayılır (karşılaştırmadan önce rakamlar maskelenir, çünkü sayfa numarası değişir). Konum kısıtı bilinçlidir — aynı ifade sayfa ortasında gerçek içerik olabilir ve korunur.
+
+Sonuç: 55 → 50 blok, beş tablo sayfasının her birinden bir çöp parça temizlendi, **897 → 897 ayrık terim** (sıfır içerik kaybı). Gecikme p50 26,7 → **25,3 sn**, p95 34,1 → **30,1 sn**.
 
 ### Taranmış (OCR) sürüm
 
@@ -328,7 +400,9 @@ belge-asistani/
 │
 ├── eval/
 │   ├── run_eval.py                 ➤ Doğruluk ölçümü + parametre taraması
-│   ├── testset_depo.yaml           ➤ 29 soru — dijital sürüm
+│   ├── test_verify.py              ➤ Guardrail birim testleri (LLM gerekmez)
+│   ├── testset_depo.yaml           ➤ 29 soru — GELİŞTİRME seti
+│   ├── testset_holdout.yaml        ➤ 29 soru — AYRILMIŞ set (kilitli)
 │   └── testset_taranmis.yaml       ➤ 16 soru — taranmış sürüm (OCR maliyeti)
 │
 ├── ornek_belgeler/

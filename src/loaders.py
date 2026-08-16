@@ -155,6 +155,71 @@ def _split_page_rows(text: str, page_no: int, order_base: int) -> List[Block]:
     return blocks
 
 
+# --------------------------------------------------------------------------
+# ÜSTBİLGİ / ALTBİLGİ (BOILERPLATE) AYIKLAMA
+# --------------------------------------------------------------------------
+# Kurumsal belgelerin hemen her sayfasında aynı üstbilgi/altbilgi bulunur
+# ("ADL-2024/117 — Merkez Depo Hizmet Sözleşmesi    Sayfa 7"). Bu satırlar
+# içerik değildir ama indekse girer ve iki ayrı zarar verir:
+#
+#   1. Tablo satırı bölme açıkken her sayfa için AYRI BİR PARÇA oluşur.
+#      20 sayfalık bir belgede 20 çöp parça demektir.
+#   2. Bu parçalar sözleşme numarası ve belge adı içerdiği için, o terimleri
+#      taşıyan sorularda BM25 skoru alır ve ilk sıralara girer. Gerçek bir
+#      ölçümde tam olarak bu oldu: dört kaynak slotundan biri altbilgi
+#      parçasına gitti ve doğru satırın yerini kaptı.
+#
+# Sabit kalıp yazmak yerine TEKRAR tespit edilir: sayfaların çoğunda, hem de
+# sayfa başında/sonunda görünen satır boilerplate'tir. Sayfa numaraları
+# değiştiği için karşılaştırmadan önce rakamlar maskelenir.
+
+_BP_HEAD_TAIL = 3          # sayfa başı/sonunda kaç satıra bakılacak
+_BP_MIN_LEN = 12           # daha kısa satırlar zaten anlamsız
+_BP_MIN_PAGES = 3          # bu kadar az sayfada tespit güvenilir değil
+
+
+def _norm_line(line: str) -> str:
+    """Karşılaştırma için satırı normalleştirir (sayfa numarası maskelenir)."""
+    s = re.sub(r"\d+", "#", line)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _detect_boilerplate(page_texts: List[str], min_ratio: float = 0.6) -> set:
+    """Sayfaların çoğunda başta/sonda tekrarlayan satırları bulur."""
+    if len(page_texts) < _BP_MIN_PAGES:
+        return set()
+    from collections import Counter
+    sayac: Counter = Counter()
+    for t in page_texts:
+        satirlar = [l for l in t.splitlines() if l.strip()]
+        aday = satirlar[:_BP_HEAD_TAIL] + satirlar[-_BP_HEAD_TAIL:]
+        for norm in {_norm_line(l) for l in aday}:
+            if len(norm) >= _BP_MIN_LEN:
+                sayac[norm] += 1
+    esik = max(_BP_MIN_PAGES, int(len(page_texts) * min_ratio))
+    return {l for l, n in sayac.items() if n >= esik}
+
+
+def _strip_boilerplate(text: str, bp: set) -> str:
+    """Tespit edilen boilerplate satırlarını YALNIZCA sayfa başı/sonundan atar.
+
+    Konum kısıtı önemlidir: aynı ifade sayfa ortasında gerçek içerik olarak
+    geçebilir (ör. sözleşme numarasının metin içinde anılması). Ortadaki
+    kullanımlar korunur.
+    """
+    if not bp:
+        return text
+    satirlar = text.splitlines()
+    n = len(satirlar)
+    tut: List[str] = []
+    for i, l in enumerate(satirlar):
+        bas_ya_da_son = i < _BP_HEAD_TAIL or i >= n - _BP_HEAD_TAIL
+        if bas_ya_da_son and l.strip() and _norm_line(l) in bp:
+            continue
+        tut.append(l)
+    return "\n".join(tut).strip()
+
+
 def load_pdf(path: Path,
              split_table_rows: bool = True,
              ocr_options: Optional[Dict[str, object]] = None,
@@ -192,8 +257,15 @@ def load_pdf(path: Path,
     scanned_pages = 0
     low_quality: List[Dict[str, object]] = []
 
+    # 1. GEÇİŞ — tüm sayfaların metnini çıkar (gerekirse OCR ile).
+    # Boilerplate tespiti sayfaları KARŞILAŞTIRMAYA dayandığı için, parçalama
+    # yapılmadan önce bütün sayfaların elde olması gerekir.
+    sayfa_metinleri: List[str] = []
+    sayfa_ocr: List[bool] = []
+
     for idx, page in enumerate(reader.pages, start=1):
         text = ""
+        bu_sayfa_ocr = False
         # DÜZEN KORUMALI ÇIKARIM: varsayılan mod tablo hücrelerini ayrı
         # satırlara dağıtıyor ve bir tablo satırı ("11/2024 | Envanter
         # sayım | 36 | 1.455.200,00") parça parça kopuyor; sonuçta indekse
@@ -225,6 +297,7 @@ def load_pdf(path: Path,
                     if len(ocr_text) > len(text):
                         text = clean_text(ocr_text)
                         ocr_used += 1
+                        bu_sayfa_ocr = True
                         # Bozuk OCR sessizce indekse girip yanlış sayı
                         # üretilmesine yol açıyor. Şüpheli sayfaları
                         # kullanıcıya bildirebilmek için işaretle.
@@ -238,23 +311,36 @@ def load_pdf(path: Path,
                 else:
                     ocr_failed_reason = reason
 
+        sayfa_metinleri.append(text)
+        sayfa_ocr.append(bu_sayfa_ocr)
+
+    # 2. GEÇİŞ — tekrarlayan üstbilgi/altbilgi satırlarını ayıkla, sonra parçala.
+    boilerplate = _detect_boilerplate(sayfa_metinleri)
+
+    for idx, (text, sayfa_ocrlu) in enumerate(zip(sayfa_metinleri, sayfa_ocr), start=1):
+        text = _strip_boilerplate(text, boilerplate)
         if not text:
             continue
+
+        # NOT: OCR işareti artık SAYFA BAZINDA. Önceden toplam sayaç
+        # kullanılıyordu; ilk OCR'lı sayfadan sonraki tüm sayfalar —dijital
+        # olsalar bile— "ocr" damgası alıyordu ve karma belgelerde hangi
+        # sayfanın gerçekten taranmış olduğu kaybediliyordu.
+        isaret = {"ocr": "1"} if sayfa_ocrlu else {}
 
         if split_table_rows:
             row_blocks = _split_page_rows(text, idx, order)
             if row_blocks:
                 order = row_blocks[-1].order
                 for b in row_blocks:
-                    if ocr_used:
+                    if sayfa_ocrlu:
                         b.extra.setdefault("ocr", "1")
                 blocks.extend(row_blocks)
                 continue
 
         order += 1
         blocks.append(Block(text=text, page=idx, locator=f"Sayfa {idx}",
-                            order=order,
-                            extra={"ocr": "1"} if ocr_used else {}))
+                            order=order, extra=isaret))
 
     if warnings is not None and low_quality:
         warnings.extend(low_quality)

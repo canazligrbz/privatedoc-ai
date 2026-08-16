@@ -81,6 +81,39 @@ sorudakiyle BİREBİR aynı olduğunu doğrula. Yakın/komşu satırı kullanma.
 Yanıt bu bloklarda yoksa yalnızca şunu yaz: "{refusal}"
 """
 
+# ---------------------------------------------------------------------------
+# DENENDİ VE İŞE YARAMADI — AY ADI ↔ AY NUMARASI EŞLEŞTİRMESİ
+# ---------------------------------------------------------------------------
+# Belge tabloda "11/2024" yazıyor, kullanıcı "Kasım 2024" diye soruyor.
+# ARAMA katmanı bu denkliği biliyor (bm25._equivalents) ve doğru satırı 1.
+# sıraya taşıyor. ÜRETİM katmanı ise satırı kullanmayı reddediyor.
+#
+# Üç müdahale denendi, üçü de ölçüldü, hiçbiri kazanç sağlamadı:
+#
+#   1. Sistem promptuna genel kural (10. kural: "Kasım=11")
+#         -> model: "belgede açık olarak verilmedi"
+#   2. Kullanıcı mesajına soruya özel NOT eklemek
+#         -> model: "belirtilmemiş bir dönemdir"
+#         Sebep: not, hemen üstündeki "BİREBİR aynı olduğunu doğrula"
+#         kuralıyla çelişiyordu ve daha kesin ifade edilmiş olan kazandı.
+#   3. Ay adı geçen sorularda eşleştirme kuralını denklik farkındalıklı
+#      bir sürümle değiştirmek
+#         -> model: düpedüz ret. Biraz daha kötü.
+#
+# Üçüncü deneme geri alındı: kazanç göstermeyen bir değişikliği iki ayrı kod
+# yolu pahasına tutmak doğru değil. Bu, 7B sınıfı modelin bilinen bir sınırı
+# olarak belgelendi (README → "Bilinen sınırlar").
+#
+# Denenmemiş seçenek: indeksleme sırasında tarih hücresini zenginleştirmek
+# ("11/2024" -> "11/2024 (Kasım 2024)"). Model eşleştirme yapmak zorunda
+# kalmazdı. Kaynak metnini değiştirdiği için gösterim metnini indeks
+# metninden ayırmak gerekir; tek soru için yapılmadı.
+#
+# DÖRDÜNCÜ BİR PROMPT DENEMESİ YAPMADAN ÖNCE: bu üç sonuç, geliştirme
+# setindeki TEK bir soruya bakılarak elde edildi. Dördüncü müdahale, ölçtüğü
+# setin skorunu iyileştirir ama genelleme hakkında bilgi vermez.
+# ---------------------------------------------------------------------------
+
 
 def build_context(chunks: List[dict], char_budget: int = 9000) -> str:
     """Getirilen parçaları numaralı, sınırları belirgin bloklara dönüştürür."""

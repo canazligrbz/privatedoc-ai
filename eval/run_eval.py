@@ -242,9 +242,11 @@ def sweep(engine: RAGEngine, cases: List[Dict]) -> List[Dict[str, Any]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--testset", default="eval/testset.yaml")
+    ap.add_argument("--testset", default="eval/testset_depo.yaml")
     ap.add_argument("--out", default=None)
     ap.add_argument("--sweep", action="store_true")
+    ap.add_argument("--holdout", action="store_true",
+                    help="Ayrılmış seti çalıştırmak için açık onay")
     args = ap.parse_args()
 
     path = Path(args.testset)
@@ -252,7 +254,30 @@ def main() -> int:
         path = Path(__file__).resolve().parent.parent / path
     cases = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     if not cases:
-        print("Test seti boş. eval/testset.yaml dosyasını doldurun.")
+        print(f"Test seti boş: {path}")
+        return 1
+
+    # ------------------------------------------------------- AYRILMIŞ SET KİLİDİ
+    # Ayrılmış setin değeri, geliştirme sırasında HİÇ GÖRÜLMEMİŞ olmasından
+    # gelir. Bir kez bakılıp sonuçlarına göre ayar yapıldığında set "yanar"
+    # ve artık genelleme ölçmez. Bu disiplini hafızaya bırakmak yerine
+    # mekanik hale getiriyoruz: açık onay olmadan çalışmaz.
+    if "holdout" in path.name.lower() and not args.holdout:
+        print("=" * 62)
+        print("  AYRILMIŞ TEST SETİ — KİLİTLİ")
+        print("=" * 62)
+        print(f"  {path.name}, geliştirme sırasında çalıştırılmamalıdır.")
+        print("  Sonuçlarına bakıp parametre ayarlanırsa set genelleme")
+        print("  ölçme özelliğini kaybeder.")
+        print("\n  Geliştirme ölçümü için:")
+        print("      python eval/run_eval.py --testset eval/testset_depo.yaml")
+        print("\n  Geliştirme gerçekten bittiyse, tek seferlik nihai ölçüm:")
+        print(f"      python eval/run_eval.py --testset {args.testset} --holdout")
+        return 1
+
+    if args.holdout and args.sweep:
+        print("Ayrılmış set üzerinde parametre taraması yapılamaz: "
+              "tarama, sete bakarak ayar yapmak demektir.")
         return 1
 
     engine = RAGEngine(CFG)
