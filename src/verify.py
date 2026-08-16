@@ -197,46 +197,199 @@ def strip_refusal_sentences(answer: str, refusal: str) -> Tuple[str, int]:
     return new_text.strip(), n
 
 
+# Kapanış/bağlaç cümleleri: "Bu nedenle ...", "Sonuç olarak ...", "Bu, ...".
+# Model bilgiyi atıfsız yazıp atfı BU cümleye koyduğunda, atıfsız bilgi
+# cümlesi ayıklanıyor ve geriye içi boş bir kapanış kalıyordu.
+_CONNECTIVE_RE = re.compile(
+    r"^\s*(?:\[K\s*\d+\]\s*)*"
+    r"(bu nedenle|bu sebeple|dolay[ıi]s[ıi]yla|sonu[cç] olarak|[oö]zetle"
+    r"|bu [sş]ekilde|b[oö]ylece|buna g[oö]re|bu bilgi|bu veriler|bu de[ğg]erler"
+    r"|yani|k[ıi]sacas[ıi]|bu,|bu\b)",
+    re.IGNORECASE,
+)
+
+
+# Madde/fıkra referansı: "13.2", "MADDE 9.1". Bunlar olgu değil, konum
+# bilgisidir; kapanış cümlesinde geçmeleri bilgi taşıdıkları anlamına gelmez.
+_CLAUSE_REF_RE = re.compile(r"^\d{1,2}\.\d{1,2}$")
+
+
+def _is_citation_carrier(sentence: str, prev_text: str) -> bool:
+    """
+    Cümle "atıf taşıyıcısı" mı? Yani atfı var ama YENİ BİR OLGU getirmiyor mu?
+
+    Böyle bir cümlenin atıfları, kendinden önceki atıfsız bilgi cümlelerine
+    devredilebilir; devir güvenlidir çünkü cümle zaten bilgi taşımıyordur.
+
+    GÜVENLİK SINIRI — bu fonksiyonun yapabileceği en tehlikeli hata, GERÇEK
+    BİLGİ taşıyan bir kapanış cümlesini taşıyıcı sanıp silmektir:
+
+        "Gizlilik ihlali cezası uygulanır [K1]. Bu ceza sözleşme bedelinin
+         yüzde ikisidir [K1]."          ← ikinci cümle SİLİNEMEZ, cevap odur
+
+    ...ve uydurma sayı içeren bir kapanışı onaylamaktır:
+
+        "... otuziki aydır [K2]. Bu nedenle toplam iş süresi 30 aydır [K2]."
+
+    Her iki hatayı da tek ölçüt engeller: kapanış cümlesindeki sayılar YA
+    kendinden önceki cümlelerde zaten geçmeli (yani yeni bir şey söylemiyor)
+    YA DA madde referansı olmalı. Aksi hâlde cümle bilgi taşıyor demektir;
+    taşıyıcı sayılmaz, normal cümle olarak kalır ve sayı denetimine girer.
+
+    "Kaynaklarda geçiyor mu?" ölçütü BİLEREK kullanılmadı: kaynakta geçen ama
+    önceki cümlelerde geçmeyen bir sayı, yeni bilgidir ve silinmemelidir.
+    """
+    if not CITATION_RE.search(sentence):
+        return False
+    if is_meta(sentence):
+        return True
+    if not _CONNECTIVE_RE.match(sentence.strip()):
+        return False
+
+    onceki = {normalize_number(n) for n in numbers_in(strip_citations(prev_text))}
+    for raw in numbers_in(strip_citations(sentence)):
+        if _CLAUSE_REF_RE.match(raw):
+            continue                      # madde referansı: olgu değil
+        if normalize_number(raw) in onceki:
+            continue                      # zaten söylenmiş: tekrar
+        return False                      # yeni sayı -> bilgi taşıyor
+    return True
+
+
+def _distribute_citations(sents: List[str], tag: str) -> List[str]:
+    """Atıfsız cümlelerin sonuna verilen atıf etiketini ekler."""
+    body: List[str] = []
+    for s in sents:
+        if CITATION_RE.search(s):
+            body.append(s)
+        else:
+            # Atıf, cümle sonu noktalamasının ÖNÜNE eklenir. Sonrasına
+            # eklenirse ("... aydır. [K1]") bir sonraki cümle bölme adımında
+            # yeniden ayrı cümle sayılıyor ve devir işlemi boşa gidiyor.
+            m = re.match(r"^(.*?)([.!?:]*)\s*$", s.rstrip(), re.DOTALL)
+            govde, nokta = (m.group(1), m.group(2)) if m else (s.rstrip(), "")
+            body.append(f"{govde.rstrip()} {tag}{nokta}")
+    return body
+
+
 def _inherit_trailing_citations(answer: str) -> str:
     """
-    Paragraf sonundaki "kaynak belirten" cümlenin atıflarını, o paragraftaki
-    atıfsız bilgi cümlelerine dağıtır ve kapanış cümlesini kaldırır.
+    Kapanış cümlesindeki atıfları, kendinden önceki atıfsız bilgi cümlelerine
+    dağıtır ve kapanış cümlesini kaldırır.
 
     Girdi : "145,00 TL yemek bedeli ödenir. Bu bilgi [K2] kaynağından alınmıştır."
     Çıktı : "145,00 TL yemek bedeli ödenir. [K2]"
+
+    İKİ GEÇİŞ YAPILIR:
+      1) Satır içi — kapanış cümlesi bilgi cümlesiyle aynı satırdaysa.
+      2) Satırlar arası — model kapanışı ayrı satıra yazdığında. Gerçek
+         testte model şunu üretti:
+             "06/2024 hakediş 1.548.750,00 TL, personel 38'dir.\\n
+              [K4][K3] Bu nedenle tablodaki değerler bu şekilde geçerlidir."
+         Yalnızca satır içi geçiş yapılırsa bu durum kaçar ve doğru cevap
+         ayıklanıp geriye içi boş kapanış cümlesi kalır.
     """
+    lines = (answer or "").split("\n")
+
+    # ---- 1) Satır içi geçiş
     out_lines: List[str] = []
-    for line in (answer or "").split("\n"):
+    for line in lines:
         if not line.strip():
             out_lines.append(line)
             continue
-
         sents = split_sentences(line)
-        if len(sents) < 2:
+        if len(sents) < 2 or not _is_citation_carrier(sents[-1], " ".join(sents[:-1])):
             out_lines.append(line)
             continue
+        cites = CITATION_RE.findall(sents[-1])
+        tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
+        out_lines.append(" ".join(_distribute_citations(sents[:-1], tag)))
 
-        last = sents[-1]
-        cites = CITATION_RE.findall(last)
-        # Kapanış cümlesi bilgi taşımıyor ve atıf içeriyorsa devret
-        if cites and is_meta(last):
-            tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
-            body = []
-            for s in sents[:-1]:
-                if CITATION_RE.search(s):
-                    body.append(s)
-                else:
-                    # Atıf, cümle sonu noktalamasının ÖNÜNE eklenir.
-                    # Sonrasına eklenirse ("... aydır. [K1]") bir sonraki
-                    # cümle bölme adımında yeniden ayrı cümle sayılıyor ve
-                    # devir işlemi boşa gidiyor.
-                    m = re.match(r"^(.*?)([.!?:]*)\s*$", s.rstrip(), re.DOTALL)
-                    govde, nokta = (m.group(1), m.group(2)) if m else (s.rstrip(), "")
-                    body.append(f"{govde.rstrip()} {tag}{nokta}")
-            out_lines.append(" ".join(body))
-        else:
-            out_lines.append(line)
+    # ---- 2) Satırlar arası geçiş
+    dolu = [i for i, l in enumerate(out_lines) if l.strip()]
+    if len(dolu) >= 2:
+        son = dolu[-1]
+        sents_son = split_sentences(out_lines[son])
+        onceki_metin = " ".join(out_lines[i] for i in dolu[:-1])
+        if len(sents_son) == 1 and _is_citation_carrier(sents_son[0], onceki_metin):
+            # Önceki satırlarda atıfsız bilgi cümlesi var mı?
+            eksik = any(
+                not CITATION_RE.search(s)
+                for i in dolu[:-1]
+                for s in split_sentences(out_lines[i])
+            )
+            if eksik:
+                cites = CITATION_RE.findall(sents_son[0])
+                tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
+                yeni: List[str] = []
+                for i, l in enumerate(out_lines):
+                    if i == son:
+                        continue
+                    if not l.strip():
+                        yeni.append(l)
+                        continue
+                    yeni.append(" ".join(
+                        _distribute_citations(split_sentences(l), tag)))
+                out_lines = yeni
+
     return "\n".join(out_lines)
+
+
+def strip_question_echo(answer: str, question: str) -> str:
+    """
+    Modelin yanıta soruyu aynen kopyalamasını temizler.
+
+    Gerçek testte model şunları üretti:
+        "Kaç adet Depo Görevlisi çalıştırılacaktır [K1]?"
+        "Forklift Operatörü ... ödenecektir? Bu konu hakkında ... bulunmamaktadır."
+
+    Birincisi atıf taşıdığı için geçerli bir yanıt sanılıyordu; oysa hiçbir
+    bilgi vermiyor. Soruyu geri yazmak yanıt değildir; ayıklanır. Geriye bir
+    şey kalmazsa yanıt reddedilir — bu, boş bir cevabı doğruymuş gibi
+    göstermekten dürüsttür.
+
+    ÖLÇÜT: "yeni içerik terimi var mı?" — ORAN DEĞİL.
+    İlk sürümde kelime örtüşme oranı (%85) kullanıldı ve bu, sistemin en
+    kötü hatalarından birini üretti. Türkçede iyi bir cevap zaten soruyu
+    tekrarlayıp boşluğu doldurur:
+
+        soru  : "... asgari ücretin yüzde KAÇ fazlası ödenecektir?"
+        cevap : "... asgari ücretin yüzde 55 fazlası ödenecektir."   %89 örtüşme
+
+    Tek fark "kaç" yerine "55" — yani cevabın ta kendisi. Oran ölçütü bu
+    doğru cevabı yankı sanıp sildi. Artık soruda geçmeyen TEK bir içerik
+    terimi bile varsa cümle yankı sayılmaz.
+
+    Yön tercihi bilinçlidir: bir yankıyı kaçırmak zayıf bir yanıt üretir,
+    doğru cevabı silmek ise yanlış bir ret üretir. İkincisi daha pahalıdır.
+    """
+    from .bm25 import content_terms
+    if not answer or not question:
+        return answer or ""
+
+    def kok(t: str) -> str:
+        # Kaba ek ayıklama: "çalıştırılacaktır" ve "çalıştırılacak" eşleşsin
+        return t[:6] if len(t) >= 7 and not t[0].isdigit() else t
+
+    q_terim = {kok(t) for t in content_terms(strip_citations(question))}
+    if len(q_terim) < 3:
+        return answer
+
+    sents = split_sentences(answer)
+    if not sents:
+        return answer
+
+    ilk = sents[0]
+    f_terim = content_terms(strip_citations(ilk))
+    if len(f_terim) < 3:
+        return answer
+
+    # Soruda geçmeyen bir terim varsa cümle bilgi taşıyor demektir.
+    if any(kok(t) not in q_terim for t in f_terim):
+        return answer
+
+    kalan = answer[answer.find(ilk) + len(ilk):].strip()
+    return kalan
 
 
 def check(answer: str,
@@ -265,7 +418,22 @@ def check(answer: str,
     if not answer or not answer.strip():
         return False, "Model boş yanıt üretti.", details, ""
 
-    # ---------- 0) ATIF DEVRİ
+    # Kaynaklardaki sayı kümesi hem atıf devri kapısında hem de sayı
+    # denetiminde kullanılır; bir kez hesaplanır.
+    allowed = context_number_set(chunk_texts)
+    allowed |= context_number_set([question or ""])
+
+    # ---------- 0a) SORU YANKISI
+    # Model bazen soruyu aynen geri yazıyor. Atıf da eklerse bu, bilgi
+    # taşımayan ama geçerli görünen bir yanıt oluyor.
+    onceki = answer
+    answer = strip_question_echo(answer, question)
+    if answer != onceki:
+        details["removed"].append("[soru yankısı]")
+    if not answer.strip():
+        return False, "Model yalnızca soruyu tekrarladı, yanıt üretmedi.", details, ""
+
+    # ---------- 0b) ATIF DEVRİ
     # Model sık sık bilgiyi atıfsız yazıp atfı sona ayrı bir cümleye koyuyor:
     #     "... 145,00 TL yemek bedeli ödenir. Bu bilgi [K2] kaynağından alınmıştır."
     # Bu, doğru bir cevaptır; sadece biçimi yanlıştır. Kapanış cümlesindeki
@@ -326,9 +494,6 @@ def check(answer: str,
 
     # ---------- 2) Sayı doğrulama (kalan metin üzerinde)
     if verify_numbers:
-        allowed = context_number_set(chunk_texts)
-        # Kullanıcının sorusunda geçen sayılar meşrudur (soru tekrarlanabilir)
-        allowed |= context_number_set([question or ""])
         body = strip_citations(cleaned)
         for raw in numbers_in(body):
             if (raw in allowed

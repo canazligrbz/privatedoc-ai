@@ -114,24 +114,35 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 ### Son ölçüm
 
-**Test seti:** `eval/testset_depo.yaml` — 29 soru (20 cevaplanabilir · 5 reddedilmesi zorunlu · 4 tuzak)
-**Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only, depodaki `config.yaml` varsayılanları
+**Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only (GPU yok), depodaki `config.yaml` varsayılanları
 
-| Metrik | Sonuç | Hedef | Anlamı |
+| Metrik | Dijital belge | Taranmış belge¹ | Hedef |
 |---|---|---|---|
-| **Genel başarı** | **%93,1** | ≥ %85 | Tüm testlerin geçme oranı |
-| **Ret doğruluğu** | **%100** | ≥ %95 | Belgede olmayan soruyu reddetme oranı |
-| **Yanlış ret** | **%5** | ≤ %10 | Cevaplanabilir soruyu boşuna reddetme |
-| **Kaynaklı yanıt** | **%100** | %100 | Atıf içeren yanıt oranı |
-| **Gecikme (medyan)** | **~25 sn** | ≤ 60 sn | 8 çekirdekli CPU, GPU yok |
+| Soru sayısı | 29 | 16 | — |
+| **Genel başarı** | **%96,6** | %62,5 | ≥ %85 |
+| **Ret doğruluğu** | **%100** | **%100** | ≥ %95 |
+| **Yanlış ret** | **%0,0** | %36,4 | ≤ %10 |
+| **Kaynaklı yanıt** | **%100** | **%100** | %100 |
+| Gecikme (medyan) | 47,0 sn | 22,9 sn | ≤ 60 sn |
+| Gecikme (p95) | 56,5 sn | 36,0 sn | — |
 
-> **En kritik satır ret doğruluğudur.** Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır. Geliştirme boyunca bu metrik hiç %100'ün altına düşmedi.
+¹ Taranmış sürüm ölçümü, aşağıdaki guardrail düzeltmelerinden **önce** alınmıştır; o koşudaki altı hatanın üçü OCR'dan değil, giderilen guardrail kusurundan kaynaklanıyordu. Gerçek OCR maliyeti yeniden ölçülecektir.
+
+> **En kritik satır ret doğruluğudur.** Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır. Geliştirme boyunca bu metrik, bozuk OCR metni üzerinde bile hiç %100'ün altına düşmedi — guardrail katmanları veri kalitesinden bağımsız çalışıyor.
 
 Sonuçları kendiniz üretmek için:
 
 ```bash
+# Dijital
 python -m src.ingest --rebuild --path ornek_belgeler/dijital
 python eval/run_eval.py --testset eval/testset_depo.yaml
+
+# Taranmış (OCR maliyeti)
+python -m src.ingest --rebuild --path ornek_belgeler/taranmis
+python eval/run_eval.py --testset eval/testset_taranmis.yaml
+
+# Guardrail birim testleri (LLM gerekmez, saniyeler sürer)
+python eval/test_verify.py
 ```
 
 ### Geliştirme boyunca ilerleme
@@ -144,9 +155,50 @@ Her sıçrama, ölçümün ortaya çıkardığı somut bir mühendislik hatasın
 | Hibrit arama + RRF | %75 | %30 | Saf vektör araması özel isimleri ve kod numaralarını ıskalıyordu |
 | Satır bazlı tablo parçalama | %82,8 | %20 | Tüm tablo tek parçaya giriyor, model komşu satırı okuyordu |
 | Cümle bazlı atıf: red yerine **ayıklama** | %89,7 | %10 | Guardrail atıfsız tek cümle yüzünden doğru yanıtın tamamını çöpe atıyordu |
-| Bağlam penceresi taşmasının giderilmesi | **%93,1** | **%5** | Prompt zamanla 4000 karaktere ulaşmış, `num_ctx` dolduğu için kaynaklar sessizce kırpılıyordu |
+| Bağlam penceresi taşmasının giderilmesi | %89,7 | **%0** | Prompt zamanla 4000 karaktere ulaşmış, `num_ctx` dolduğu için kaynaklar sessizce kırpılıyordu |
+| Atıf devri kapısının genişletilmesi | **%96,6** | **%0** | Guardrail, modelin doğru cevabını silip yerine boş kapanış cümlesini bırakıyordu |
 
-Son satır özellikle öğreticidir: sistem prompt'una kural eklemek bedava değildir. Kurallar biriktikçe pencere doldu, Ollama sessizce kırpma yaptı ve **aynı soruya farklı zamanlarda farklı yanıt** gelmeye başladı. Çözüm iki parçalıydı — prompt 1741 karaktere indirildi ve `_fit_char_budget()` eklenerek bağlam bütçesi pencereye göre otomatik daraltıldı.
+Bağlam taşması özellikle öğreticidir: sistem prompt'una kural eklemek bedava değildir. Kurallar biriktikçe pencere doldu, Ollama sessizce kırpma yaptı ve **aynı soruya farklı zamanlarda farklı yanıt** gelmeye başladı. Çözüm iki parçalıydı — prompt 1741 karaktere indirildi ve `_fit_char_budget()` eklenerek bağlam bütçesi pencereye göre otomatik daraltıldı.
+
+### Nasıl teşhis edildi
+
+%89,7'lik koşudaki üç hatanın hiçbiri arama ya da model hatası değildi. Üçünde de doğru kaynak getirilmiş, model doğru cevabı üretmiş, **guardrail cevabı silmişti**:
+
+```
+soru  : Kasım 2024 döneminin açıklaması ve tutarı nedir?
+model : "11/2024 dönemi Envanter sayım dönemidir ve tutarı 1.455.200,00 TL'dir.
+         Bu nedenle, [K1][K3] doğru."
+kullanıcıya gösterilen: "Bu nedenle, [K1][K3] doğru."          ← bilgi yok oldu
+```
+
+Model bilgiyi atıfsız yazıp atfı sonraki kapanış cümlesine koyuyor. Cümle bazlı atıf denetimi (katman 5) atıfsız cümleyi ayıklıyor, geriye içi boş kapanış kalıyor. Atıf devri mekanizması (`_inherit_trailing_citations`) tam bunun için vardı ama kapısı yalnızca "kaynak/belge" sözcüğü geçen cümleleri tanıyacak kadar dardı.
+
+Kapı genişletildi: bir kapanış cümlesi, atfı varsa ve **yeni bir olgu getirmiyorsa** taşıyıcı sayılır; atıfları kendinden önceki cümlelere devredilir. "Yeni olgu getirmiyor" ölçütü, cümledeki sayıların ya önceki cümlelerde zaten geçmesi ya da madde referansı olmasıdır. Bu ölçüt iki hatayı birden engeller — bilgi taşıyan bir kapanışın silinmesini *ve* uydurma sayı içeren bir kapanışın onaylanmasını.
+
+Aynı koşuda ayrıca modelin soruyu aynen geri yazdığı iki durum görüldü (`"Kaç adet Depo Görevlisi çalıştırılacaktır [K1]?"`). Atıf taşıdığı için geçerli yanıt sanılıyordu; artık ayıklanıyor ve geriye bir şey kalmazsa reddediliyor.
+
+**Bu ayıklayıcının ilk sürümü, sistemin en pahalı hatalarından birini üretti.** Ölçüt olarak kelime örtüşme oranı (%85) kullanılmıştı. Oysa Türkçede iyi bir cevap zaten soruyu tekrarlayıp boşluğu doldurur:
+
+```
+soru  : "... asgari ücretin yüzde KAÇ fazlası ödenecektir?"
+cevap : "... asgari ücretin yüzde 55 fazlası ödenecektir."      → %89 örtüşme
+```
+
+Tek fark `kaç` → `55`, yani cevabın kendisi. Ayıklayıcı bunu yankı sanıp sildi ve iki soru daha bozuldu. Ölçüt orandan **"soruda geçmeyen tek bir içerik terimi var mı"**ya çevrildi. Yön tercihi bilinçlidir: bir yankıyı kaçırmak zayıf bir yanıt üretir, doğru cevabı silmek yanlış bir ret üretir — ikincisi daha pahalıdır.
+
+Bu mantığın gerilemesini önlemek için 15 birim testi yazıldı (`eval/test_verify.py`), LLM gerektirmez, saniyeler sürer. Bir kısmı düzeltmeleri, `🔒` işaretli olanlar guardrail'in **asıl görevini** korur: bir değişiklik uydurma sayı testlerini bozuyorsa o değişiklik yanlıştır.
+
+### Kalan tek hata
+
+29 sorudan biri hâlâ geçmiyor ve bu artık guardrail değil, model hatasıdır:
+
+```
+soru  : "Kasım 2024 döneminin açıklaması ve tutarı nedir?"
+K1    : "[TABLO SATIRI] ... 11/2024 Envanter sayım dönemi 36 1.455.200,00"   ← 1. sırada
+model : "Kasım 2024 döneminin açıklaması ve tutarı belgede açık olarak verilmedi [K1][K3]."
+```
+
+Arama görevini yapmış — BM25'teki `Kasım → 11` denkliği doğru satırı ilk sıraya taşımış. Model, elindeki satırla soruyu eşleştirmeyi reddediyor. Sistem prompt'undaki 10. kural bu denkliği zaten söylüyor, ancak 11 kuralın arasındaki genel bir kural 7B sınıfı bir model için yeterince güçlü değil. Planlanan çözüm, soruda ay adı geçtiğinde kullanıcı mesajına o soruya özel tek satırlık bir eşleştirme notu eklemektir (yeniden indeksleme gerektirmez).
 
 ### Taranmış (OCR) sürüm
 
@@ -157,9 +209,22 @@ python -m src.ingest --rebuild --path ornek_belgeler/taranmis
 python eval/run_eval.py --testset eval/testset_taranmis.yaml
 ```
 
-`eval/testset_taranmis.yaml` — 16 soru (11 cevaplanabilir · 5 reddedilmesi zorunlu). Sorular kasıtlı olarak **komşu satır ayrımı** gerektirir: "Forklift Operatörü %55" sorulduğunda hemen yanındaki 145, 95, 75, 30 değerleri tuzaktır; OCR sütunları karıştırırsa tam burada görünür.
+`eval/testset_taranmis.yaml` — 16 soru (11 cevaplanabilir · 5 reddedilmesi zorunlu). Sorular kasıtlı olarak **komşu satır ayrımı** gerektirir: "Forklift Operatörü %55" sorulduğunda hemen yanındaki 145, 95, 75, 30 değerleri tuzaktır.
 
-> **Not:** OCR bozulması guardrail ile düzeltilemez. Model, bozuk kaynaktaki sayıyı sadakatle aktarır — `%170` yerine `%960` okunmuşsa, doğru davranış o yanlış sayıyı yazmaktır. Bu yüzden çözüm gizlemek değil **görünür kılmak** oldu: `src/ocr.py → assess_quality()` her sayfaya kalite puanı verir ve düşük puanlı sayfalar indeksleme raporunda listelenir.
+Ölçülen bozulma, tablo satırlarında gözle görülür:
+
+```
+dijital  : 11/2024 Envanter sayım dönemi        36   1.455.200,00
+taranmış : 11/2024 Envanter sayım dönemi        36 © 1.455.200,00
+taranmış : 12/2024 | Vil sovid kapaiiis  | | 36. —«*1..455.200,00
+taranmış : sözleşme bedelinin yüzde ikisi (962) oranında      ← (%2) → (962)
+```
+
+Ham skor farkı **%89,7 → %62,5**'tir; ancak bunun tamamı OCR'ın suçu değildir. Altı hatanın üçünde doğru satır getirilmişti ve yukarıda anlatılan guardrail kusuru devredeydi — yani bu üçü dijital koşudaki hatalarla **aynı** hatadır. Gerçek OCR maliyeti, o kusur giderildikten sonraki ölçümle netleşecektir. Kalan üç hata gerçekten OCR kaynaklıdır: ücret tablosunun satırları taramada okunamamış, dolayısıyla indekse hiç girmemiştir.
+
+> **OCR bozulması guardrail ile düzeltilemez.** Model, bozuk kaynaktaki sayıyı sadakatle aktarır — `%2` yerine `962` okunmuşsa doğru davranış o sayıyı yazmaktır. Bu yüzden çözüm gizlemek değil **görünür kılmak** oldu: `src/ocr.py → assess_quality()` her sayfaya kalite puanı verir, düşük puanlı sayfalar indeksleme raporunda listelenir.
+>
+> Dikkat çekici olan şu: taranmış koşuda genel başarı düşerken **ret doğruluğu %100'de kaldı**. Sistem, veri bozulduğunda yanlış cevap üretmeye değil, susmaya yöneliyor — tasarım hedefiyle tutarlı davranış.
 
 ---
 
@@ -605,7 +670,8 @@ Uygulama ayrıca **süreç içinde** localhost dışı tüm TCP bağlantıların
 | `ModuleNotFoundError` — paketler kurulu olmasına rağmen | Sanal ortam etkin değil. Komut satırında `(.venv)` öneki görünmeli: `.venv\Scripts\activate`. |
 | `unable to allocate CUDA_Host buffer` | GPU yokken Ollama sabitlenmiş bellek ayırmaya çalışıyor. `config.yaml → llm.num_gpu: 0`. |
 | `out of memory` / LLM 500 hatası | `num_ctx`'i 4096'ya, `num_predict`'i 700'e, `context_char_budget`'i 5500'e düşürün. Sırasıyla en etkilisi `num_ctx`'tir. |
-| `LLM sunucusuna ulaşılamıyor` | Ollama çalışmıyor. `ollama serve` başlatın; `ollama list` ile modeli doğrulayın. |
+| `LLM sunucusuna ulaşılamıyor` / `WinError 10061` | Ollama çalışmıyor. `ollama serve` başlatın; `ollama list` ile modeli doğrulayın. |
+| Eval koşusunda tüm sorular `YANLIŞ RET → LLM erişilemez` | Aynı sebep: Ollama kapalı. Gecikmenin 2–3 sn'ye düşmesi bunun işaretidir (normalde ~25 sn). `run_eval.py` artık başlamadan önce LLM sağlığını kontrol eder ve koşu ortasında kesinti olursa **sonuç üretmeden durur** — kesintili bir koşu, inandırıcı görünen yanlış bir skor üretiyordu. |
 | `Embedding modeli bulunamadı` | `models/bge-m3` eksik veya symlink kopyalanmış. Transferi `local_dir_use_symlinks=False` ile yapın; klasörde `model.safetensors` + `config.json` + `1_Pooling/` olmalı. |
 | `AirGapViolation` | Bir bileşen dışarı çıkmaya çalıştı — **bu bir güvenlik bulgusudur, koruma kapatılarak geçilmemelidir.** Hata mesajındaki hedef adresi ve çağıran kütüphaneyi inceleyin. |
 | Belge klasörde ama cevap gelmiyor | Belge listesindeki işarete bakın: ● indekslendi · ○ indekslenmedi · ▲ hata. Yükleme sonrası indeksi güncellemeniz gerekir. |

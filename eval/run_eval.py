@@ -50,6 +50,30 @@ def normalize(s: str) -> str:
     return (s or "").lower().replace("i̇", "i").replace("İ", "i")
 
 
+# LLM erişilemediğinde motorun kullanıcıya döndürdüğü hata metninin izleri.
+# Bu bir "yanlış cevap" değil, ALTYAPI KESİNTİSİDİR; ölçüme karıştırılmamalıdır.
+_OUTAGE_MARKERS = (
+    "yerel llm sunucusuna ulaşılamadı",
+    "llm isteği başarısız",
+    "winerror 10061",
+    "connection refused",
+    "llm erişilemez",
+)
+
+
+def looks_like_outage(row: Dict[str, Any]) -> bool:
+    metin = normalize(" ".join([
+        row.get("answer") or "",
+        row.get("raw_answer") or "",
+        " ".join(row.get("issues") or []),
+    ]))
+    return any(m in metin for m in _OUTAGE_MARKERS)
+
+
+class EvalAborted(RuntimeError):
+    """Ölçüm geçersiz; sonuç üretilmemelidir."""
+
+
 def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
     t0 = time.time()
     res = engine.answer(case["question"])
@@ -153,8 +177,26 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def run_once(engine: RAGEngine, cases: List[Dict], verbose: bool = True) -> Dict[str, Any]:
     rows = []
+    ardisik_kesinti = 0
     for i, case in enumerate(cases, 1):
         r = evaluate_case(engine, case)
+
+        # ALTYAPI KESİNTİSİ ÖLÇÜM DEĞİLDİR.
+        # Ollama kapalıyken koşu, cevaplanabilir soruların hepsini "yanlış ret"
+        # sayar ama must_refuse sorularını GEÇMİŞ gösterir (hata metni beklenen
+        # bilgiyi içermediği için "reddetti" sanılır). Sonuç: "%31 başarı,
+        # %100 ret doğruluğu" gibi makul görünen ama tamamen anlamsız bir rapor.
+        # Gerçek bir koşuda tam olarak bu oldu; sayı rapora girebilirdi.
+        if looks_like_outage(r):
+            ardisik_kesinti += 1
+            if ardisik_kesinti >= 3:
+                raise EvalAborted(
+                    f"{i}. soruda LLM'e üst üste {ardisik_kesinti} kez ulaşılamadı. "
+                    "Ölçüm geçersiz olacağı için durduruldu."
+                )
+        else:
+            ardisik_kesinti = 0
+
         rows.append(r)
         if verbose:
             mark = "✔" if r["passed"] else "✖"
@@ -218,21 +260,48 @@ def main() -> int:
         print("İndeks boş. Önce 'python -m src.ingest' çalıştırın.")
         return 1
 
+    # ---------------------------------------------------------------- ÖN KONTROL
+    # 29 soruyu çalıştırıp sonunda "LLM kapalıymış" demek yerine, en baştan
+    # tek istekle anlaşılır. Kesintili bir koşu yalnızca zaman kaybettirmez,
+    # inandırıcı görünen YANLIŞ BİR SKOR üretir.
+    from src.llm_client import LocalLLM  # noqa: E402
+    saglik = LocalLLM(CFG).health()
+    if not saglik["online"] or not saglik["model_available"]:
+        print("=" * 62)
+        print("  ÖLÇÜM BAŞLATILMADI — LLM hazır değil")
+        print("=" * 62)
+        print(f"  {saglik['message']}")
+        print("\n  Yapılacaklar:")
+        print("    1) Ollama'yı başlatın:   ollama serve")
+        print(f"    2) Modeli doğrulayın :   ollama list   "
+              f"({CFG.get_path('llm.model')} görünmeli)")
+        print("    3) Tam kontrol       :   python scripts/verify_offline.py")
+        return 1
+
     print(f"\n{len(cases)} test sorusu çalıştırılıyor...\n")
 
-    if args.sweep:
-        table = sweep(engine, cases)
-        print("\n\n=== EN İYİ 5 KOMBİNASYON ===")
-        for row in table[:5]:
-            print(json.dumps(row, ensure_ascii=False))
-        payload: Any = table
-    else:
-        result = run_once(engine, cases)
+    try:
+        if args.sweep:
+            table = sweep(engine, cases)
+            print("\n\n=== EN İYİ 5 KOMBİNASYON ===")
+            for row in table[:5]:
+                print(json.dumps(row, ensure_ascii=False))
+            payload: Any = table
+        else:
+            result = run_once(engine, cases)
+            print("\n" + "=" * 62)
+            for k, v in result["summary"].items():
+                print(f"  {k:<22}: {v}")
+            print("=" * 62)
+            payload = result
+    except EvalAborted as exc:
         print("\n" + "=" * 62)
-        for k, v in result["summary"].items():
-            print(f"  {k:<22}: {v}")
+        print("  ÖLÇÜM İPTAL EDİLDİ — SONUÇ ÜRETİLMEDİ")
         print("=" * 62)
-        payload = result
+        print(f"  {exc}")
+        print("\n  Ollama koşu sırasında durmuş olabilir. Başlatıp tekrar deneyin:")
+        print("    ollama serve")
+        return 1
 
     if args.out:
         Path(args.out).write_text(json.dumps(payload, ensure_ascii=False, indent=2),
