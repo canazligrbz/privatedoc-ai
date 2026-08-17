@@ -2,7 +2,9 @@
 
 İnternete hiç çıkmadan çalışan, yalnızca size ait belgelere dayanarak yanıt veren, **her cümlesinde kaynak gösteren** ve bilmediğinde bilmediğini söyleyen bir RAG (Retrieval-Augmented Generation) uygulaması.
 
-Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalışır. Hiçbir belge, hiçbir soru, hiçbir yanıt makineden dışarı çıkmaz — bu bir yapılandırma tercihi değil, kod seviyesinde zorlanan bir kısıttır (`src/airgap.py`).
+Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalışır. Uygulama süreci localhost dışına hiçbir bağlantı kuramaz; bu bir yapılandırma tercihi değil, kod seviyesinde zorlanan bir kısıttır (`src/airgap.py`).
+
+> **Korumanın kapsamı — dürüst sınır.** `airgap.py` **uygulama sürecini** yamalar. LLM'i çalıştıran Ollama ise **ayrı bir süreçtir** ve bu yamanın kapsamı dışındadır: belgeleriniz ona localhost üzerinden ulaşır, ancak Ollama'nın kendi dış bağlantıları (ör. sürüm denetimi) süreç içi koruma tarafından engellenemez. **Makine düzeyinde tam yalıtım için ağ arayüzü kapatılmalı veya güvenlik duvarı kuralı yazılmalıdır** (§9, Aşama 4). Kurulum sonrası "ağı kesin" adımının neden isteğe bağlı değil zorunlu olduğunun cevabı budur.
 
 > **Tasarım hedefi:** *"Doğru cevap veremiyorsa cevap vermesin."*
 > Sistem, yanlış bilgi üretmektense `Bu konu hakkında yüklenen belgelerde bilgi bulunmamaktadır.` demeye zorlanmıştır. Ölçülen ret doğruluğu **%100**'dür (bkz. [§2](#2-değerlendirme-sonuçları)).
@@ -13,7 +15,7 @@ Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalış
 
 | | |
 |---|---|
-| 🔒 **Tam çevrimdışı** | localhost dışı TCP ve DNS süreç içinde bloklanır; ağ kablosu takılı olsa bile veri çıkamaz |
+| 🔒 **Çevrimdışı** | Uygulama sürecinde localhost dışı TCP ve DNS bloklanır — Ollama ayrı süreç olduğu için kapsam dışı, bkz. kapsam notu |
 | 📑 **Zorunlu atıf** | Sayı/tarih içeren her cümle kaynak numarası taşımak zorunda; taşımayan cümle yanıttan çıkarılır |
 | 🔢 **Sayı doğrulama** | Yanıttaki her sayı, getirilen kaynak metinlerde birebir aranır — model kendi hesapladığı sayıyı yazamaz |
 | 🔎 **Hibrit arama** | Anlamsal (bge-m3) + kelime bazlı (BM25) arama, RRF ile birleştirilir; özel isimler ve kod numaraları kaybolmaz |
@@ -76,7 +78,7 @@ python scripts/download_models.py --out models
 # 5) Dil modelini indirin (~4.7 GB, tek seferlik)
 ollama pull qwen2.5:7b-instruct-q4_K_M
 
-# 6) Kurulumu doğrulayın — 10 kontrolün tamamı ✔ olmalı
+# 6) Kurulumu doğrulayın — 13 kontrol
 python scripts/verify_offline.py
 ```
 
@@ -335,7 +337,36 @@ Ara ölçümdeki %62,5 ile buradaki %56,2 farkı da bir gerileme değildir: eski
 
 Depo Müdürü %145, Forklift Operatörü %55, Depo Görevlisi 16 kişi — hiçbiri indekse girmedi. Bu üç soruda getirme de model de kusursuz çalıştı; **cevaplanacak veri hiç var olmadı.**
 
-> **Kalite ölçer bu sayfayı kaçırdı.** `assess_quality()` sayfa 2'ye **1.00** (kusursuz) verdi ve sıfır sorun bildirdi. Ölçer bozuk karakter arıyor; **eksik içerik** aramıyor. Tablosunun tamamını kaybetmiş bir sayfa "temiz" işaretlendi. Sistemin "kullanıcıyı bozuk OCR'a karşı uyar" mekanizması tam da uyarması gereken yerde sustu — düzeltilmesi gereken en somut kusur bu.
+**Kalite ölçer bu sayfayı kaçırmıştı.** `assess_quality()` sayfa 2'ye **1.00** (kusursuz) verdi ve sıfır sorun bildirdi. Ölçer bozuk *karakter* arıyordu; kaybolan *içerik* geride iz bırakmaz ki aranabilsin. Tablosunun tamamını yitirmiş bir sayfa "temiz" işaretlendi ve kullanıcı "bu bilgi belgede yok" cevabını alıp inanırdı.
+
+Bu, sistemin üretebileceği en tehlikeli hata türüdür: **sessiz veri kaybı.** Bozuk bir karakteri görürsünüz, eksik bir tabloyu göremezsiniz.
+
+### Çözüm — metni sayfa görüntüsüyle karşılaştırmak
+
+Kaybolan içerik metinde iz bırakmaz, ama **görüntüde bırakır**: sayfada mürekkep vardır, karşılığı olan karakterler yoktur. Ölçüt bu orandır (`src/ocr.py → assess_content_loss`).
+
+Kalibrasyon, tahminle değil ölçümle yapıldı (300 dpi, taranmış üç sayfa):
+
+| sayfa | içerik | karakter kaybı | krk/mürekkep |
+|---|---|---|---|
+| 1 | hakediş tablosu | %34 | 2,5 |
+| 2 | ücret tablosu | %30 | 2,7 |
+| 3 | düz metin | %0 | **4,0** |
+
+Dijital orijinallerde üç sayfa da ~3,9–4,0 veriyor; yani sapmanın kendisi kaybın ölçüsü. Eşik **3,0** seçildi — hasarlı iki sayfayı yakalar, temiz sayfayı rahat bırakır.
+
+Ölçüt iki katmanlıdır: mutlak eşiğin yanında **belge-içi göreli** karşılaştırma da yapılır (sayfa, belgenin en iyi sayfasının %70'inin altında mı). Göreli ölçüt yazı boyutu farklarına göre kendini ayarlar; belgenin tüm sayfaları hasarlıysa mutlak eşik devreye girer.
+
+Aynı belgede artık şu uyarı üretiliyor:
+
+```
+sayfa 2  skor 0.64
+  - sayfada mürekkep var ama az metin çıktı (2.7 krk/mürekkep, eşik 3.0)
+    — tablo satırları okunamamış olabilir
+  - belgenin en iyi sayfasının %70'inin altında (2.7 / 3.9)
+```
+
+> **Bu bir sezgisel ölçüttür, kanıt değil.** Fotoğraf, kaşe veya logo içeren sayfalarda mürekkep yüksek çıkar ve yanlış uyarı üretebilir. Bu yüzden çıktı bir *uyarıdır*, hata değil: sayfa yine indekslenir, kullanıcıya yalnızca "buradaki verilere güvenme" denir. Eşik `config.yaml → ocr.min_chars_per_ink` ile ayarlanabilir.
 
 > **OCR bozulması guardrail ile düzeltilemez.** Model, bozuk kaynaktaki sayıyı sadakatle aktarır; `%2` yerine `962` okunmuşsa doğru davranış o sayıyı yazmaktır. Çözüm gizlemek değil görünür kılmaktır — ama görünür kılma mekanizmasının kendisi de çalışmak zorundadır.
 
@@ -436,7 +467,7 @@ belge-asistani/
 │   ├── download_models.py          ➤ [internetli] model indirici
 │   ├── prepare_offline_bundle.ps1  ➤ [internetli] transfer paketi (Windows)
 │   ├── prepare_offline_bundle.sh   ➤ [internetli] transfer paketi (Linux)
-│   ├── verify_offline.py           ➤ Kurulum kabul testi (10 kontrol)
+│   ├── verify_offline.py           ➤ Kurulum kabul testi (13 kontrol)
 │   ├── setup_ocr.py                ➤ Tesseract tespiti + config.yaml güncelleme
 │   ├── make_test_pdf.py            ➤ Sentetik test belgesi üreticisi
 │   └── find_text.py                ➤ İndekste düz metin arama (teşhis aracı)
@@ -725,7 +756,7 @@ pip install --no-index --find-links=<USB>\offline_bundle\wheelhouse -r requireme
 python scripts\verify_offline.py
 ```
 
-`verify_offline.py` çıktısında **10 kontrolün tamamı ✔ olmalıdır** (indeks henüz boşken 2 kontrol `!` verir, normaldir):
+`verify_offline.py` **13 kontrol** çalıştırır. İndeks henüz boşken 2 kontrol `!` verir (normaldir); makine ağa bağlıysa "Makine yalıtımı" kontrolü de `!` verir — bu, süreç içi korumanın kapsamadığı alanı hatırlatır:
 
 ```
  ✔  Python sürümü                     Python 3.11.9 (AMD64)
@@ -749,7 +780,9 @@ Get-NetAdapter | Disable-NetAdapter -Confirm:$false     # Windows
 nmcli networking off                                    # Linux
 ```
 
-Uygulama ayrıca **süreç içinde** localhost dışı tüm TCP bağlantılarını ve DNS çözümlemelerini bloklar (`src/airgap.py`). Ağ kablosu takılı kalsa bile veri dışarı çıkamaz.
+Uygulama ayrıca **kendi süreci içinde** localhost dışı tüm TCP bağlantılarını ve DNS çözümlemelerini bloklar (`src/airgap.py`).
+
+> **Bu adım atlanamaz.** Süreç içi koruma yalnızca uygulamayı kapsar; Ollama ayrı bir süreç olarak çalışır ve socket yaması ona ulaşmaz. Makinenin tamamının yalıtımı ancak ağ arayüzünün kapatılmasıyla sağlanır. `scripts/verify_offline.py` süreç içi korumayı doğrular; işletim sistemi düzeyindeki yalıtımı **doğrulamaz** — onu kurumun ağ ekibi teyit etmelidir.
 
 ---
 

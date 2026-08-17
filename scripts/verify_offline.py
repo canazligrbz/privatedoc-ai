@@ -100,6 +100,42 @@ def t_airgap():
     return False, "UYARI: harici bağlantı ENGELLENMEDİ"
 
 
+def t_machine_isolation():
+    """
+    MAKİNE DÜZEYİNDE YALITIM — süreç içi korumanın KAPSAMADIĞI alan.
+
+    airgap.py yalnızca bu Python sürecinin socket'ini yamalar. LLM'i çalıştıran
+    Ollama AYRI BİR SÜREÇTİR: belgeler ona localhost üzerinden ulaşır, ancak
+    kendi dış bağlantılarını (sürüm denetimi vb.) süreç içi koruma engelleyemez.
+
+    Bu kontrol, makinenin hâlâ bir ağa bağlı olup olmadığını varsayılan ağ
+    geçidine bakarak söyler. Amaç kurulumu reddetmek değil, kapsam boşluğunu
+    GÖRÜNÜR kılmaktır: uyarı varsa yalıtım işletim sistemi düzeyinde
+    tamamlanmamış demektir.
+    """
+    import subprocess
+
+    try:
+        if platform.system() == "Windows":
+            # "route print 0.0.0.0" varsayılan rota tablosunu verir; 0.0.0.0 ile
+            # başlayan bir satır varsa makinenin çıkışı vardır.
+            out = subprocess.run(["route", "print", "0.0.0.0"],
+                                 capture_output=True, text=True, timeout=15).stdout
+            gecit_var = any(l.strip().startswith("0.0.0.0")
+                            for l in out.splitlines())
+        else:
+            out = subprocess.run(["ip", "route", "show", "default"],
+                                 capture_output=True, text=True, timeout=15).stdout
+            gecit_var = bool(out.strip())
+    except Exception as exc:
+        return "warn", f"ağ durumu belirlenemedi ({type(exc).__name__}) — elle doğrulayın"
+
+    if gecit_var:
+        return "warn", ("makine hâlâ bir ağa bağlı; Ollama süreci koruma "
+                        "kapsamı DIŞINDA — ağ arayüzünü kapatın (§9 Aşama 4)")
+    return True, "varsayılan ağ geçidi yok, makine yalıtılmış"
+
+
 def t_embedding():
     from src.embedder import embed_query, model_info
     v = embed_query("sözleşme feshi için kaç gün önceden bildirim yapılır")
@@ -261,7 +297,8 @@ def main() -> int:
     check("Python paketleri", t_packages)
     check("Disk alanı", t_disk)
     check("RAM", t_ram)
-    check("Air-gap koruması", t_airgap)
+    check("Air-gap koruması (süreç içi)", t_airgap)
+    check("Makine yalıtımı (süreç DIŞI)", t_machine_isolation)
     check("Embedding modeli dosyaları", t_models_dir)
     check("Embedding üretimi", t_embedding)
     check("Vektör veri tabanı", t_vectordb)

@@ -262,6 +262,7 @@ def load_pdf(path: Path,
     # yapılmadan önce bütün sayfaların elde olması gerekir.
     sayfa_metinleri: List[str] = []
     sayfa_ocr: List[bool] = []
+    sayfa_istatistik: Dict[int, Dict[str, float]] = {}
 
     for idx, page in enumerate(reader.pages, start=1):
         text = ""
@@ -291,13 +292,19 @@ def load_pdf(path: Path,
                 if ok:
                     if progress:
                         progress(f"{path.name}: sayfa {idx}/{total} OCR ile okunuyor…")
-                    ocr_text = ocr_mod.ocr_page(
+                    ocr_text, ocr_stats = ocr_mod.ocr_page_with_stats(
                         path, idx - 1, lang=lang, dpi=dpi,
                         preprocess=preprocess, preserve_spaces=preserve_spaces)
                     if len(ocr_text) > len(text):
                         text = clean_text(ocr_text)
                         ocr_used += 1
                         bu_sayfa_ocr = True
+                        # İçerik kaybı değerlendirmesi belge geneline göre
+                        # yapılır; istatistik şimdilik biriktirilir.
+                        ocr_stats["chars"] = float(len(text))
+                        ocr_stats["chars_per_ink"] = ocr_mod.chars_per_ink(
+                            len(text), ocr_stats.get("ink_ratio", 0.0))
+                        sayfa_istatistik[idx] = ocr_stats
                         # Bozuk OCR sessizce indekse girip yanlış sayı
                         # üretilmesine yol açıyor. Şüpheli sayfaları
                         # kullanıcıya bildirebilmek için işaretle.
@@ -313,6 +320,30 @@ def load_pdf(path: Path,
 
         sayfa_metinleri.append(text)
         sayfa_ocr.append(bu_sayfa_ocr)
+
+    # SESSİZ İÇERİK KAYBI DENETİMİ
+    # Bozuk karakter denetimi (assess_quality) kaybolan içeriği göremez:
+    # geriye bozulmuş bir şey kalmaz ki tespit edilsin. Gerçek bir ölçümde
+    # bir ücret tablosunun yedi satırı da yok oldu ve sayfa "kusursuz"
+    # işaretlendi. Bu yüzden metin, SAYFA GÖRÜNTÜSÜYLE karşılaştırılır.
+    # Karşılaştırma belgenin kendi en iyi sayfasına göre de yapılır; böylece
+    # yazı boyutu farkları kendiliğinden normalleşir.
+    if sayfa_istatistik:
+        from . import ocr as ocr_mod
+        en_iyi = max((s.get("chars_per_ink", 0.0)
+                      for s in sayfa_istatistik.values()), default=0.0)
+        for sayfa_no, stat in sorted(sayfa_istatistik.items()):
+            skor, sorunlar = ocr_mod.assess_content_loss(
+                stat,
+                doc_best=en_iyi,
+                floor=float(opts.get("min_chars_per_ink", 3.0)),
+            )
+            if sorunlar:
+                low_quality.append({
+                    "page": sayfa_no,
+                    "score": round(skor, 2),
+                    "issues": sorunlar,
+                })
 
     # 2. GEÇİŞ — tekrarlayan üstbilgi/altbilgi satırlarını ayıkla, sonra parçala.
     boilerplate = _detect_boilerplate(sayfa_metinleri)
@@ -342,8 +373,24 @@ def load_pdf(path: Path,
         blocks.append(Block(text=text, page=idx, locator=f"Sayfa {idx}",
                             order=order, extra=isaret))
 
+    # Aynı sayfa hem karakter bozukluğundan hem içerik kaybından işaretlenmiş
+    # olabilir; kullanıcıya sayfa başına TEK kayıt gösterilir.
     if warnings is not None and low_quality:
-        warnings.extend(low_quality)
+        birlesik: Dict[int, Dict[str, object]] = {}
+        for kayit in low_quality:
+            sayfa = int(kayit.get("page", 0))
+            mevcut = birlesik.get(sayfa)
+            if mevcut is None:
+                birlesik[sayfa] = dict(kayit)
+                continue
+            mevcut["score"] = min(float(mevcut.get("score", 1.0)),
+                                  float(kayit.get("score", 1.0)))
+            sorunlar = list(mevcut.get("issues") or [])
+            for s in (kayit.get("issues") or []):
+                if s not in sorunlar:
+                    sorunlar.append(s)
+            mevcut["issues"] = sorunlar
+        warnings.extend(birlesik[k] for k in sorted(birlesik))
 
     if not blocks:
         if scanned_pages and ocr_failed_reason:

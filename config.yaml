@@ -160,6 +160,14 @@ ocr:
   # korunur (Tesseract preserve_interword_spaces).
   preserve_spaces: true
   min_chars_per_page: 60       # Bu değerin altındaki sayfa "taranmış" sayılır
+  min_chars_per_ink: 3.0       # SESSİZ İÇERİK KAYBI EŞİĞİ.
+                               # Sayfa görüntüsündeki mürekkep başına düşen
+                               # karakter sayısı bunun altındaysa "OCR içeriği
+                               # okuyamadı" uyarısı verilir. Ölçüm: hasarsız
+                               # sayfa 4.0, tablo satırlarını kaybeden sayfalar
+                               # 2.5-2.7 verdi. Yükseltmek daha çok uyarı,
+                               # düşürmek daha az uyarı demektir. Sayfalarında
+                               # fotoğraf/kaşe bulunan belgelerde düşürün.
   # Tesseract PATH'te değilse tam yolu yazın. Windows'ta genellikle:
   #   "C:/Program Files/Tesseract-OCR/tesseract.exe"
   tesseract_cmd: ""            # Boş bırakın: PATH ve bilinen kurulum konumları

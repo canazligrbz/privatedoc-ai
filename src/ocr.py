@@ -168,13 +168,36 @@ def _enhance(image):
         return image
 
 
-def ocr_page(pdf_path: Path, page_index: int,
-             lang: str = "tur+eng", dpi: int = 300,
-             preprocess: bool = True, preserve_spaces: bool = True) -> str:
+def _ink_ratio(image) -> float:
     """
-    Tek bir PDF sayfasını OCR ile metne çevirir (0 tabanlı indeks).
-    Hata durumunda boş dize döner — indeksleme tamamen durmamalıdır.
+    Görüntüdeki koyu piksel oranı — sayfada "ne kadar mürekkep var".
+
+    Bu, üretilen metnin beklenen miktarla karşılaştırılmasını sağlar. Sayfada
+    bol mürekkep varken az karakter çıkmışsa, OCR içeriği okuyamamış demektir.
     """
+    try:
+        import numpy as np
+        arr = np.asarray(image.convert("L"))
+        return float((arr < 200).mean())
+    except Exception:
+        return 0.0
+
+
+def ocr_page_with_stats(pdf_path: Path, page_index: int,
+                        lang: str = "tur+eng", dpi: int = 300,
+                        preprocess: bool = True,
+                        preserve_spaces: bool = True) -> Tuple[str, Dict[str, float]]:
+    """
+    Sayfayı OCR ile metne çevirir ve ölçüm istatistiklerini de döndürür.
+
+    -> (metin, {"ink_ratio": ..., "chars": ..., "chars_per_ink": ...})
+
+    Mürekkep oranı, OCR için ZATEN üretilen görüntüden hesaplanır; ek render
+    maliyeti yoktur. İyileştirmeden (autocontrast/unsharp) ÖNCE ölçülür:
+    iyileştirme koyu piksel sayısını değiştirir ve ölçüyü belgeye göre
+    karşılaştırılamaz hâle getirirdi.
+    """
+    bos = {"ink_ratio": 0.0, "chars": 0.0, "chars_per_ink": 0.0}
     try:
         import pypdfium2 as pdfium
         import pytesseract
@@ -188,6 +211,8 @@ def ocr_page(pdf_path: Path, page_index: int,
         finally:
             pdf.close()
 
+        ink = _ink_ratio(image)
+
         if preprocess:
             image = _enhance(image)
 
@@ -199,13 +224,118 @@ def ocr_page(pdf_path: Path, page_index: int,
             cfg += " -c preserve_interword_spaces=1"
 
         raw = pytesseract.image_to_string(image, lang=lang, config=cfg)
-        return _clean_ocr(raw)
+        text = _clean_ocr(raw)
+        return text, {
+            "ink_ratio": ink,
+            "chars": float(len(text)),
+            "chars_per_ink": chars_per_ink(len(text), ink),
+        }
     except Exception:
-        return ""
+        return "", dict(bos)
+
+
+def ocr_page(pdf_path: Path, page_index: int,
+             lang: str = "tur+eng", dpi: int = 300,
+             preprocess: bool = True, preserve_spaces: bool = True) -> str:
+    """
+    Tek bir PDF sayfasını OCR ile metne çevirir (0 tabanlı indeks).
+    Hata durumunda boş dize döner — indeksleme tamamen durmamalıdır.
+    """
+    return ocr_page_with_stats(pdf_path, page_index, lang=lang, dpi=dpi,
+                               preprocess=preprocess,
+                               preserve_spaces=preserve_spaces)[0]
 
 
 def describe() -> str:
     return str(_STATE.get("reason") or "denetlenmedi")
+
+
+# --------------------------------------------------------------------------
+# SESSİZ İÇERİK KAYBI TESPİTİ
+# --------------------------------------------------------------------------
+# assess_quality() bozuk KARAKTER arar. Gerçek bir ölçümde bunun yetmediği
+# görüldü: taranmış bir ücret tablosunun YEDİ VERİ SATIRININ TAMAMI OCR'da
+# kayboldu, geriye yalnızca başlık kaldı —
+#
+#     Unvan   Kisi | Ucret (asgari ucretin yuzde fazlasi) |
+#     6.2. Yukaridaki oranlar brut asgari ucret uzerinden hesaplanir...
+#          ^ başlık var, 7 veri satırı YOK
+#
+# ...ve assess_quality o sayfaya 1.00 (kusursuz) verip sıfır sorun bildirdi.
+# Bozulmamış metinde aranacak bir bozukluk yoktur; kaybolan içerik geride iz
+# bırakmaz. Üç soru bu yüzden cevapsız kaldı ve kullanıcı "bu bilgi belgede
+# yok" cevabını alıp inanırdı.
+#
+# Bu, sistemin üretebileceği en tehlikeli hata türüdür: SESSİZ veri kaybı.
+#
+# ÇÖZÜM: Metni kendisiyle değil, SAYFA GÖRÜNTÜSÜYLE karşılaştırmak. Sayfada
+# bol mürekkep varken az karakter üretilmişse içerik okunamamıştır.
+#
+# KALİBRASYON (ornek_belgeler/taranmis, 3 sayfa, 300 dpi):
+#     sayfa   içerik            karakter kaybı   krk/mürekkep
+#       1     hakediş tablosu        %34             2.5
+#       2     ücret tablosu          %30             2.7
+#       3     düz metin               %0             4.0
+# Dijital orijinallerde üç sayfa da ~3.9-4.0 veriyor; yani sapma doğrudan
+# kaybın ölçüsüdür. Eşik 3.0 seçildi: hasarlı iki sayfayı yakalar, temiz
+# sayfayı rahat bırakır.
+#
+# SINIRLARI: Bu bir sezgisel ölçüttür, kanıt değil. Yazı boyutu çok büyük
+# belgelerde oran doğal olarak düşer; fotoğraf/logo/kaşe içeren sayfalarda da
+# mürekkep yüksek çıkar. Bu yüzden ÇIKTI BİR UYARIDIR, hata değil — sayfa
+# yine indekslenir, kullanıcıya yalnızca "buradaki verilere güvenme" denir.
+# Mutlak eşiğin yanına belge-içi göreli karşılaştırma da eklenmiştir; belgenin
+# kendi en iyi sayfası referans alındığında yazı boyutu etkisi kendiliğinden
+# düşer.
+
+INK_SCALE = 10000.0          # oranı okunabilir bir büyüklüğe taşır
+
+
+def chars_per_ink(chars: int, ink_ratio: float) -> float:
+    """Mürekkep birimi başına üretilen karakter sayısı."""
+    if ink_ratio <= 0:
+        return 0.0
+    return float(chars) / (ink_ratio * INK_SCALE)
+
+
+def assess_content_loss(stats: Dict[str, float],
+                        doc_best: float = 0.0,
+                        floor: float = 3.0,
+                        relative: float = 0.7) -> Tuple[float, list]:
+    """
+    Sayfada sessiz içerik kaybı olup olmadığını değerlendirir.
+
+    -> (0.0-1.0 güven skoru, sorunlar)
+
+    İki ölçüt birlikte kullanılır:
+      * MUTLAK  : krk/mürekkep < floor
+      * GÖRELİ  : krk/mürekkep < belgenin en iyi sayfasının `relative` katı
+    Göreli ölçüt yazı boyutuna göre kendini ayarlar ama belgenin TÜM sayfaları
+    hasarlıysa işe yaramaz; mutlak eşik tam olarak o boşluğu kapatır.
+    """
+    issues: list = []
+    ink = float(stats.get("ink_ratio", 0.0))
+    oran = float(stats.get("chars_per_ink", 0.0))
+
+    # Mürekkep yok denecek kadar azsa sayfa gerçekten boştur; kayıp değildir.
+    if ink < 0.002:
+        return 1.0, issues
+
+    ceza = 0.0
+    if oran < floor:
+        ceza += min(0.6, (floor - oran) / max(floor, 1e-6))
+        issues.append(
+            f"sayfada mürekkep var ama az metin çıktı "
+            f"({oran:.1f} krk/mürekkep, eşik {floor:.1f}) — "
+            f"tablo satırları okunamamış olabilir")
+
+    if doc_best > 0 and oran < doc_best * relative:
+        ceza += 0.25
+        issues.append(
+            f"belgenin en iyi sayfasının %{relative*100:.0f}'inin altında "
+            f"({oran:.1f} / {doc_best:.1f})")
+
+    return max(0.0, 1.0 - ceza), issues
 
 
 # --------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 HIZLI BİRİM TESTLERİ
 ====================
 Kapsam: guardrail (src/verify.py) · değerlendirme ölçütü (eval/matching.py)
-        · belge okuma (src/loaders.py)
+        · OCR içerik kaybı (src/ocr.py) · belge okuma (src/loaders.py)
 
 Buradaki her durum GERÇEK bir hatadan doğdu. Değerlendirme koşuları
 (run_eval.py) LLM gerektirir ve ~15 dakika sürer; bu testler saniyeler
@@ -167,6 +167,54 @@ def _boilerplate_testleri() -> List[Tuple[str, bool]]:
 
 
 # =====================================================================
+#  OCR — SESSİZ İÇERİK KAYBI TESPİTİ
+# ---------------------------------------------------------------------
+#  Gerçek ölçümde taranmış bir ücret tablosunun 7 veri satırının tamamı
+#  kayboldu ve assess_quality o sayfaya 1.00 (kusursuz) verdi: bozulmamış
+#  metinde aranacak bozukluk yoktur, kaybolan içerik iz bırakmaz.
+#  Çözüm, metni sayfa GÖRÜNTÜSÜYLE karşılaştırmaktır.
+#
+#  Değerler gerçek ölçümden alınmıştır (300 dpi, ornek_belgeler/taranmis):
+#    hasarsız düz metin sayfası : 4.0 krk/mürekkep
+#    tablo satırı kaybeden sayfa: 2.5 - 2.7
+# =====================================================================
+
+def _icerik_kaybi_testleri() -> List[Tuple[str, bool]]:
+    from src.ocr import assess_content_loss, chars_per_ink
+
+    def stat(krk: int, murekkep: float) -> dict:
+        return {"ink_ratio": murekkep, "chars": float(krk),
+                "chars_per_ink": chars_per_ink(krk, murekkep)}
+
+    # Gerçek ölçüm: sayfa 2, ücret tablosunun 7 satırı kayıp
+    hasarli = stat(577, 0.0214)          # -> 2.7
+    # Gerçek ölçüm: sayfa 3, düz metin, kayıp yok
+    saglam = stat(1014, 0.0254)          # -> 4.0
+    en_iyi = saglam["chars_per_ink"]
+
+    s_hasarli, i_hasarli = assess_content_loss(hasarli, doc_best=en_iyi)
+    s_saglam, i_saglam = assess_content_loss(saglam, doc_best=en_iyi)
+
+    # Neredeyse boş sayfa (kapak, ayraç): kayıp değildir, uyarı verilmemeli
+    bos = stat(12, 0.0005)
+    s_bos, i_bos = assess_content_loss(bos, doc_best=en_iyi)
+
+    # Belgenin TÜM sayfaları hasarlıysa göreli ölçüt işe yaramaz;
+    # mutlak eşik devreye girmeli
+    s_hepsi, i_hepsi = assess_content_loss(hasarli, doc_best=hasarli["chars_per_ink"])
+
+    return [
+        ("içerik kaybeden sayfa yakalandı", bool(i_hasarli) and s_hasarli < 0.8),
+        ("🔒 sağlam sayfa uyarı ALMADI (yanlış pozitif yok)",
+         not i_saglam and s_saglam == 1.0),
+        ("🔒 neredeyse boş sayfa uyarı ALMADI", not i_bos),
+        ("tüm sayfalar hasarlıyken mutlak eşik yakaladı", bool(i_hepsi)),
+        ("uyarı metni eyleme dönüştürülebilir",
+         any("tablo satırları" in s for s in i_hasarli)),
+    ]
+
+
+# =====================================================================
 #  DEĞERLENDİRME ÖLÇÜTÜ — beklenti eşleştirme (eval/matching.py)
 # ---------------------------------------------------------------------
 #  İki yönlü sınanır:
@@ -218,9 +266,11 @@ def _olcut_testleri() -> List[Tuple[str, bool]]:
 
 def main() -> int:
     olcut_testleri = _olcut_testleri()
+    ocr_testleri = _icerik_kaybi_testleri()
     bp_testleri = _boilerplate_testleri()
     gecen = 0
-    toplam = len(DURUMLAR) + len(olcut_testleri) + len(bp_testleri)
+    toplam = (len(DURUMLAR) + len(olcut_testleri) + len(ocr_testleri)
+              + len(bp_testleri))
     print(f"{toplam} birim testi çalıştırılıyor...\n")
 
     print("-- guardrail (src/verify.py) " + "-" * 34)
@@ -238,6 +288,11 @@ def main() -> int:
 
     print("\n-- değerlendirme ölçütü (eval/matching.py) " + "-" * 20)
     for ad, sonuc in olcut_testleri:
+        gecen += bool(sonuc)
+        print(f" {'✔' if sonuc else '✖'} {ad}")
+
+    print("\n-- OCR içerik kaybı (src/ocr.py) " + "-" * 30)
+    for ad, sonuc in ocr_testleri:
         gecen += bool(sonuc)
         print(f" {'✔' if sonuc else '✖'} {ad}")
 
