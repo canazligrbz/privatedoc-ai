@@ -120,9 +120,9 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 |---|---|---|---|---|
 | Soru sayısı | 29 | 29 | 16 | — |
 | Sorular görüldü mü? | evet, ayar buna göre | **hayır** | evet | — |
-| **Genel başarı** | %96,6 | **%93,1** | %62,5 | ≥ %85 |
+| **Genel başarı** | %96,6 | **%93,1** | %56,2 | ≥ %85 |
 | **Ret doğruluğu** | %100 | **%100** | %100 | ≥ %95 |
-| **Yanlış ret** | %5,0 | %10,0 | %36,4 | ≤ %10 |
+| **Yanlış ret** | %5,0 | %10,0 | %54,5 | ≤ %10 |
 | **Kaynaklı yanıt** | %100 | **%100** | %100 | %100 |
 | Gecikme (medyan)² | 25–41 sn | 22–36 sn | 23 sn | ≤ 60 sn |
 | Gecikme (p95)² | 30–48 sn | 28–45 sn | 36 sn | — |
@@ -144,7 +144,7 @@ Sistemin kalan zayıflığı **tek bir yerde toplanmış durumda: getirme değil
 
 > **Ayrılmış set artık harcanmıştır.** Tek seferlik açıldı ve sonuçları raporlandı. Buradan sonra yapılacak iyileştirmeler geliştirme seti üzerinde yürütülmeli, genelleme yeniden ölçülecekse **yeni** bir ayrılmış set yazılmalıdır. Bu setin sonuçlarına bakarak parametre ayarlamak, onu ikinci bir geliştirme setine dönüştürür.
 
-¹ Taranmış sürüm ölçümü, guardrail düzeltmelerinden **önce** alınmıştır; o koşudaki altı hatanın üçü OCR'dan değil, sonradan giderilen guardrail kusurundan kaynaklanıyordu. Gerçek OCR maliyeti yeniden ölçülecektir.
+¹ Taranmış sürüm, aynı sözleşmenin 7., 8. ve 13. sayfalarının taranmış görüntüsüdür. Ayrıntılı çözümleme aşağıda.
 
 ² Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
 
@@ -308,11 +308,38 @@ taranmış : 12/2024 | Vil sovid kapaiiis  | | 36. —«*1..455.200,00
 taranmış : sözleşme bedelinin yüzde ikisi (962) oranında      ← (%2) → (962)
 ```
 
-Ham skor farkı **%89,7 → %62,5**'tir; ancak bunun tamamı OCR'ın suçu değildir. Altı hatanın üçünde doğru satır getirilmişti ve yukarıda anlatılan guardrail kusuru devredeydi — yani bu üçü dijital koşudaki hatalarla **aynı** hatadır. Gerçek OCR maliyeti, o kusur giderildikten sonraki ölçümle netleşecektir. Kalan üç hata gerçekten OCR kaynaklıdır: ücret tablosunun satırları taramada okunamamış, dolayısıyla indekse hiç girmemiştir.
+**Ölçülen: %96,6 → %56,2. OCR maliyeti 40 puan.**
 
-> **OCR bozulması guardrail ile düzeltilemez.** Model, bozuk kaynaktaki sayıyı sadakatle aktarır — `%2` yerine `962` okunmuşsa doğru davranış o sayıyı yazmaktır. Bu yüzden çözüm gizlemek değil **görünür kılmak** oldu: `src/ocr.py → assess_quality()` her sayfaya kalite puanı verir, düşük puanlı sayfalar indeksleme raporunda listelenir.
->
-> Dikkat çekici olan şu: taranmış koşuda genel başarı düşerken **ret doğruluğu %100'de kaldı**. Sistem, veri bozulduğunda yanlış cevap üretmeye değil, susmaya yöneliyor — tasarım hedefiyle tutarlı davranış.
+Bu sonuç iki tahmini birden çürüttü ve ikisi de bu README'de yazılıydı:
+
+- *"Guardrail düzeltmeleri taranmış skoru yükseltecek."* **Yükseltmedi.** Aynı ölçütle bakıldığında düzeltmelerden önce de sonra da 9/16. Etki tam olarak sıfır.
+- *"Altı hatanın üçü guardrail kusuruydu, OCR değil."* **Yanlıştı.** O üç hata guardrail'den değil, aşağıdaki nedenlerden kaynaklanıyordu.
+
+Ara ölçümdeki %62,5 ile buradaki %56,2 farkı da bir gerileme değildir: eski ölçüt 10. soruyu hak etmeden geçiriyordu (OCR `(%2)`'yi `(962)` okumuş, alt dizi araması `962` içinde `2` bulmuştu). Aynı cetvelle iki koşu da 9/16'dır.
+
+**Yedi hatanın gerçek dağılımı:**
+
+| Neden | Soru | Ayrıntı |
+|---|---|---|
+| OCR veriyi **yok etti** | 5, 6, 7 | Ücret tablosunun 7 veri satırının tamamı kayboldu |
+| OCR sayıyı **bozdu** | 10 | `(%2)` → `(962)`; model bozuk değeri sadakatle aktardı |
+| Getirme sıralaması | 1 | `06/2024` satırı OCR metninde VAR ama ilk 4'e giremedi; `"Not: 06/2024-08/2024..."` satırı onu geçti |
+| Bilinen model sınırı | 2, 3 | Ay adı ↔ ay numarası (`Kasım`→11, `Mart`→03) — dijitalde de olan sınır |
+
+Ücret tablosunun kaybı en ağır olanı. OCR başlığı okumuş, satırları okumamış:
+
+```
+   Unvan   Kisi | Ucret (asgari ucretin yuzde fazlasi) |
+   6.2. Yukaridaki oranlar brut asgari ucret uzerinden hesaplanir...
+```
+
+Depo Müdürü %145, Forklift Operatörü %55, Depo Görevlisi 16 kişi — hiçbiri indekse girmedi. Bu üç soruda getirme de model de kusursuz çalıştı; **cevaplanacak veri hiç var olmadı.**
+
+> **Kalite ölçer bu sayfayı kaçırdı.** `assess_quality()` sayfa 2'ye **1.00** (kusursuz) verdi ve sıfır sorun bildirdi. Ölçer bozuk karakter arıyor; **eksik içerik** aramıyor. Tablosunun tamamını kaybetmiş bir sayfa "temiz" işaretlendi. Sistemin "kullanıcıyı bozuk OCR'a karşı uyar" mekanizması tam da uyarması gereken yerde sustu — düzeltilmesi gereken en somut kusur bu.
+
+> **OCR bozulması guardrail ile düzeltilemez.** Model, bozuk kaynaktaki sayıyı sadakatle aktarır; `%2` yerine `962` okunmuşsa doğru davranış o sayıyı yazmaktır. Çözüm gizlemek değil görünür kılmaktır — ama görünür kılma mekanizmasının kendisi de çalışmak zorundadır.
+
+> **Buna karşılık ret doğruluğu %100'de kaldı.** Verinin yarısı yok olmuşken bile sistem yanlış cevap üretmedi, sustu. 5 "reddedilmesi zorunlu" sorunun tamamı doğru sonuçlandı. Bozuk veride bile uydurmama davranışı korunuyor — asıl güvence bu.
 
 ---
 
