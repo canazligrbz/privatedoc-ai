@@ -124,8 +124,8 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 | **Ret doğruluğu** | %100 | **%100** | %100 | ≥ %95 |
 | **Yanlış ret** | %5,0 | %10,0 | %36,4 | ≤ %10 |
 | **Kaynaklı yanıt** | %100 | **%100** | %100 | %100 |
-| Gecikme (medyan) | 25,4 sn | 21,8 sn | 22,9 sn | ≤ 60 sn |
-| Gecikme (p95) | 30,4 sn | 28,3 sn | 36,0 sn | — |
+| Gecikme (medyan)² | 25–41 sn | 22–36 sn | 23 sn | ≤ 60 sn |
+| Gecikme (p95)² | 30–48 sn | 28–45 sn | 36 sn | — |
 
 **Genelleme farkı: 3,5 puan.** Hiç görülmemiş 29 soruda skor %96,6'dan %93,1'e düştü. Bu küçük fark, sistemin test setine ezberlemediğini gösterir.
 
@@ -145,6 +145,22 @@ Sistemin kalan zayıflığı **tek bir yerde toplanmış durumda: getirme değil
 > **Ayrılmış set artık harcanmıştır.** Tek seferlik açıldı ve sonuçları raporlandı. Buradan sonra yapılacak iyileştirmeler geliştirme seti üzerinde yürütülmeli, genelleme yeniden ölçülecekse **yeni** bir ayrılmış set yazılmalıdır. Bu setin sonuçlarına bakarak parametre ayarlamak, onu ikinci bir geliştirme setine dönüştürür.
 
 ¹ Taranmış sürüm ölçümü, guardrail düzeltmelerinden **önce** alınmıştır; o koşudaki altı hatanın üçü OCR'dan değil, sonradan giderilen guardrail kusurundan kaynaklanıyordu. Gerçek OCR maliyeti yeniden ölçülecektir.
+
+² Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
+
+### Ölçüm aletinin doğrulanması
+
+Değerlendirme başlangıçta beklenen ifadeyi **alt dizi** olarak arıyordu. Bu, kısa sayısal beklentilerde yanlış yanıtlara puan verebilirdi:
+
+```
+"Kesin teminat oranı nedir?"   beklenen: "6"
+   model "%16'dır" derse  → "16" içinde "6" var → GEÇER (hak edilmemiş)
+   model "36 ay" derse    → "36" içinde "6" var → GEÇER (hak edilmemiş)
+```
+
+İki test setinde 23 kısa sayısal beklenti vardı. Ölçüt, rakam sınırı zorunlu kılacak şekilde sıkılaştırıldı (`eval/matching.py`). Sınırlar iki yönlü sınandı: modelin doğal olarak yazacağı 12 doğru biçim (`%6'sı`, `1.548.750,00 TL`, `18 (onsekiz) ay`, `2 - 8 °C`, `24:00-08:00`) geçmeye devam ediyor, 8 yakın-yanlış biçim artık eleniyor.
+
+**Sonuç: her iki setin skoru da değişmedi** (%96,6 ve %93,1). Yani hiçbir soru tesadüfen geçmiyormuş; rapor edilen sayılar sıkı ölçütle de aynı. Bu bir negatif sonuçtur ve önemlidir — şişme olmadığı artık varsayım değil, ölçüm.
 
 > **En kritik satır ret doğruluğudur.** Kurumsal bir asistanda yanlış bilgi vermek, "bilmiyorum" demekten çok daha pahalıdır. Geliştirme boyunca bu metrik, bozuk OCR metni üzerinde bile hiç %100'ün altına düşmedi — guardrail katmanları veri kalitesinden bağımsız çalışıyor.
 

@@ -1,6 +1,8 @@
 """
-HIZLI BİRİM TESTLERİ — guardrail (src/verify.py) + belge okuma (src/loaders.py)
-================================================================================
+HIZLI BİRİM TESTLERİ
+====================
+Kapsam: guardrail (src/verify.py) · değerlendirme ölçütü (eval/matching.py)
+        · belge okuma (src/loaders.py)
 
 Buradaki her durum GERÇEK bir hatadan doğdu. Değerlendirme koşuları
 (run_eval.py) LLM gerektirir ve ~15 dakika sürer; bu testler saniyeler
@@ -26,7 +28,9 @@ from pathlib import Path
 from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from matching import normalize, value_in  # noqa: E402
 from src.verify import check  # noqa: E402
 
 # --------------------------------------------------------------- kaynaklar
@@ -162,10 +166,61 @@ def _boilerplate_testleri() -> List[Tuple[str, bool]]:
     ]
 
 
+# =====================================================================
+#  DEĞERLENDİRME ÖLÇÜTÜ — beklenti eşleştirme (eval/matching.py)
+# ---------------------------------------------------------------------
+#  İki yönlü sınanır:
+#   · DOĞRU cevaplar geçmeye devam etmeli (yanlış negatif olmamalı)
+#   · Yakın-yanlış cevaplar artık GEÇMEMELİ (şişme kırılmalı)
+#  Birinci yön daha kritiktir: ölçüt fazla katı olursa sistem olduğundan
+#  kötü görünür ve var olmayan hatalar kovalanır.
+# =====================================================================
+
+# (beklenen, cevap) — hepsi GEÇMELİ
+OLCUT_DOGRU = [
+    ("6", "Kesin teminat oranı sözleşme bedelinin %6'sıdır [K1]."),
+    ("6", "Teminat oranı yüzde 6 olarak belirlenmiştir [K1]."),
+    ("1.548.750", "06/2024 döneminde tutar 1.548.750,00 TL'dir [K1]."),
+    ("145", "Günlük yemek bedeli 145,00 TL'dir [K1]."),
+    ("18", "İşin süresi 18 (onsekiz) aydır [K1]."),
+    ("2", "Soğuk odada sıcaklık 2 - 8 °C aralığında olmalıdır [K1]."),
+    ("24:00", "Üçüncü vardiya 24:00-08:00 arasındadır [K1]."),
+    ("500", "Bakım periyodu 500 çalışma saatidir [K1]."),
+    ("%10", "Toplam ceza %10'u aştığında fesih edilebilir [K1]."),
+    ("18.400", "Merkez Deponun kapalı alanı 18.400 m²'dir [K1]."),
+    ("servis", "Personele servis aracı sağlanır, ücreti YÜKLENİCİ karşılar [K1]."),
+    ("aydın", "Aydın mahkemeleri ve icra daireleri yetkilidir [K1]."),
+]
+
+# (beklenen, cevap) — hiçbiri GEÇMEMELİ
+OLCUT_YANLIS = [
+    ("6", "Kesin teminat oranı %16'dır [K1]."),
+    ("6", "Garanti süresi 36 aydır [K1]."),
+    ("2", "Sözleşme 2024 tarihlidir [K1]."),
+    ("2", "Toplam 12 vardiya vardır [K1]."),
+    ("500", "Tutar 1.500,00 TL'dir [K1]."),
+    ("8", "Süre 18 aydır [K1]."),
+    ("34", "Toplam 340 palet bulunmaktadır [K1]."),
+    ("145", "Bakım bedeli 1.450,00 TL'dir [K1]."),
+]
+
+
+def _olcut_testleri() -> List[Tuple[str, bool]]:
+    out: List[Tuple[str, bool]] = []
+    yn = [b for b, c in OLCUT_DOGRU if not value_in(normalize(c), b)]
+    out.append((f"🔒 doğru cevaplar geçiyor ({len(OLCUT_DOGRU)} durum)"
+                + (f" — YANLIŞ NEGATİF: {yn}" if yn else ""), not yn))
+    hg = [b for b, c in OLCUT_YANLIS if value_in(normalize(c), b)]
+    out.append((f"yakın-yanlış cevaplar elendi ({len(OLCUT_YANLIS)} durum)"
+                + (f" — HÂLÂ GEÇEN: {hg}" if hg else ""), not hg))
+    return out
+
+
 def main() -> int:
+    olcut_testleri = _olcut_testleri()
     bp_testleri = _boilerplate_testleri()
     gecen = 0
-    toplam = len(DURUMLAR) + len(bp_testleri)
+    toplam = len(DURUMLAR) + len(olcut_testleri) + len(bp_testleri)
     print(f"{toplam} birim testi çalıştırılıyor...\n")
 
     print("-- guardrail (src/verify.py) " + "-" * 34)
@@ -180,6 +235,11 @@ def main() -> int:
             print(f"     yanıt    : {temiz[:120]!r}")
             if ayrinti["removed"]:
                 print(f"     atılan   : {ayrinti['removed']}")
+
+    print("\n-- değerlendirme ölçütü (eval/matching.py) " + "-" * 20)
+    for ad, sonuc in olcut_testleri:
+        gecen += bool(sonuc)
+        print(f" {'✔' if sonuc else '✖'} {ad}")
 
     print("\n-- belge okuma (src/loaders.py) " + "-" * 31)
     for ad, sonuc in bp_testleri:

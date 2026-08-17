@@ -45,9 +45,8 @@ enforce_airgap(
 
 from src.rag_engine import RAGEngine  # noqa: E402
 
-
-def normalize(s: str) -> str:
-    return (s or "").lower().replace("i̇", "i").replace("İ", "i")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from matching import normalize, value_in  # noqa: E402
 
 
 # LLM erişilemediğinde motorun kullanıcıya döndürdüğü hata metninin izleri.
@@ -124,7 +123,7 @@ def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
 
     # Hepsi bulunmalı
     for kw in case.get("expect_keywords", []) or []:
-        if normalize(kw) not in answer_n:
+        if not value_in(answer_n, kw):
             out["passed"] = False
             out["issues"].append(f"eksik anahtar kelime: '{kw}'")
 
@@ -132,7 +131,7 @@ def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
     # Örnek: "yüzbinde üç" ile "0,00003" aynı oranı ifade eder; modelin
     # hangisini seçtiği doğruluk değil biçim meselesidir.
     alts = case.get("expect_any", []) or []
-    if alts and not any(normalize(a) in answer_n for a in alts):
+    if alts and not any(value_in(answer_n, a) for a in alts):
         out["passed"] = False
         out["issues"].append(
             f"şu ifadelerden hiçbiri yok: {', '.join(repr(a) for a in alts)}")
@@ -143,7 +142,7 @@ def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
         out["issues"].append(f"beklenen kaynak atfı yok: '{exp_src}'")
 
     for kw in case.get("forbid_keywords", []) or []:
-        if normalize(kw) in answer_n:
+        if value_in(answer_n, kw):
             out["passed"] = False
             out["issues"].append(f"YASAKLI İFADE ÜRETİLDİ (tuzağa düştü): '{kw}'")
 

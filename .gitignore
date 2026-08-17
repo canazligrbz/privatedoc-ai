@@ -39,6 +39,9 @@ eval/sonuc*.json
 eval/rapor*.json
 eval/tarama*.json
 
+# --- Kişisel çalışma notları (depoya girmez) ---
+YAPILACAKLAR.md
+
 # --- Ortam / sırlar ---
 .env
 .env.*
