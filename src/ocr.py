@@ -183,6 +183,93 @@ def _ink_ratio(image) -> float:
         return 0.0
 
 
+# OCR, karakter yüksekliği ~20 pikselin altına düştüğünde belirgin şekilde
+# bozulur. Düşük çözünürlüklü taramalar ve telefonla çekilmiş görüntüler bu
+# sınırın altında kalabilir; büyütmek bilgi eklemez ama Tesseract'ın harf
+# ayrıştırmasını kolaylaştırır ve pratikte hata oranını düşürür.
+_MIN_UZUN_KENAR = 1600
+_HEDEF_UZUN_KENAR = 2200
+# Aşırı büyük görüntülerde OCR süresi ve bellek patlar; makul bir tavan.
+_MAX_UZUN_KENAR = 6000
+
+
+def _olcekle(image):
+    """Çok küçük görüntüyü büyütür, aşırı büyüğü sınırlar."""
+    try:
+        from PIL import Image
+        w, h = image.size
+        uzun = max(w, h)
+        if uzun == 0:
+            return image
+        if uzun < _MIN_UZUN_KENAR:
+            k = _HEDEF_UZUN_KENAR / uzun
+            return image.resize((max(1, int(w * k)), max(1, int(h * k))),
+                                Image.LANCZOS)
+        if uzun > _MAX_UZUN_KENAR:
+            k = _MAX_UZUN_KENAR / uzun
+            return image.resize((max(1, int(w * k)), max(1, int(h * k))),
+                                Image.LANCZOS)
+        return image
+    except Exception:
+        return image
+
+
+def _ocr_image(image, lang: str, preprocess: bool,
+               preserve_spaces: bool) -> Tuple[str, Dict[str, float]]:
+    """
+    Bir PIL görüntüsünü OCR'lar ve ölçüm istatistikleriyle döndürür.
+
+    Hem PDF sayfaları hem de doğrudan görüntü dosyaları buradan geçer;
+    böylece iyileştirme, mürekkep ölçümü ve temizleme mantığı tek yerde kalır.
+
+    Mürekkep oranı, iyileştirmeden ÖNCE ölçülür: autocontrast/unsharp koyu
+    piksel sayısını değiştirir ve ölçüyü belgeler arası karşılaştırılamaz
+    hâle getirirdi.
+    """
+    import pytesseract
+
+    ink = _ink_ratio(image)
+    if preprocess:
+        image = _enhance(image)
+
+    # --psm 6: "tek tip metin bloğu" — cetvel/tablo sayfalarında en isabetlisi
+    cfg = "--oem 3 --psm 6"
+    if preserve_spaces:
+        # Sütunlar arasındaki boşluğun korunması, tabloda hangi değerin
+        # hangi sütuna ait olduğunu ayırt edebilmek için gereklidir.
+        cfg += " -c preserve_interword_spaces=1"
+
+    raw = pytesseract.image_to_string(image, lang=lang, config=cfg)
+    text = _clean_ocr(raw)
+    return text, {
+        "ink_ratio": ink,
+        "chars": float(len(text)),
+        "chars_per_ink": chars_per_ink(len(text), ink),
+    }
+
+
+def ocr_image_file(path: Path, lang: str = "tur+eng",
+                   preprocess: bool = True,
+                   preserve_spaces: bool = True) -> List[Tuple[str, Dict[str, float]]]:
+    """
+    Görüntü dosyasını (JPG/PNG/TIFF/BMP) OCR ile metne çevirir.
+
+    -> [(metin, istatistik), ...]  — çok sayfalı TIFF için birden fazla öğe
+
+    PDF'ten farklı olarak görüntüde METİN KATMANI YOKTUR: OCR isteğe bağlı
+    bir yedek değil, tek yoldur. Bu yüzden Tesseract eksikse sessizce boş
+    dönmek yerine çağıran tarafın hata vermesi gerekir.
+    """
+    from PIL import Image, ImageSequence
+
+    out: List[Tuple[str, Dict[str, float]]] = []
+    with Image.open(str(path)) as im:
+        for kare in ImageSequence.Iterator(im):
+            g = _olcekle(kare.convert("L"))
+            out.append(_ocr_image(g, lang, preprocess, preserve_spaces))
+    return out
+
+
 def ocr_page_with_stats(pdf_path: Path, page_index: int,
                         lang: str = "tur+eng", dpi: int = 300,
                         preprocess: bool = True,
@@ -200,7 +287,6 @@ def ocr_page_with_stats(pdf_path: Path, page_index: int,
     bos = {"ink_ratio": 0.0, "chars": 0.0, "chars_per_ink": 0.0}
     try:
         import pypdfium2 as pdfium
-        import pytesseract
 
         pdf = pdfium.PdfDocument(str(pdf_path))
         try:
@@ -211,25 +297,7 @@ def ocr_page_with_stats(pdf_path: Path, page_index: int,
         finally:
             pdf.close()
 
-        ink = _ink_ratio(image)
-
-        if preprocess:
-            image = _enhance(image)
-
-        # --psm 6: "tek tip metin bloğu" — cetvel/tablo sayfalarında en isabetlisi
-        cfg = "--oem 3 --psm 6"
-        if preserve_spaces:
-            # Sütunlar arasındaki boşluğun korunması, tabloda hangi değerin
-            # hangi sütuna ait olduğunu ayırt edebilmek için gereklidir.
-            cfg += " -c preserve_interword_spaces=1"
-
-        raw = pytesseract.image_to_string(image, lang=lang, config=cfg)
-        text = _clean_ocr(raw)
-        return text, {
-            "ink_ratio": ink,
-            "chars": float(len(text)),
-            "chars_per_ink": chars_per_ink(len(text), ink),
-        }
+        return _ocr_image(image, lang, preprocess, preserve_spaces)
     except Exception:
         return "", dict(bos)
 

@@ -120,18 +120,34 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 | Metrik | Geliştirme seti | **Ayrılmış set** | Taranmış¹ | Hedef |
 |---|---|---|---|---|
-| Soru sayısı | 29 | 29 | 16 | — |
 | Sorular görüldü mü? | evet, ayar buna göre | **hayır** | evet | — |
-| **Genel başarı** | %96,6 | **%93,1** | %56,2 | ≥ %85 |
-| **Ret doğruluğu** | %100 | **%100** | %100 | ≥ %95 |
-| **Yanlış ret** | %5,0 | %10,0 | %54,5 | ≤ %10 |
-| **Kaynaklı yanıt** | %100 | **%100** | %100 | %100 |
+| **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | **27/29 · %93**<br><sub>GA %78–98</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
+| **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
+| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 6/11 · %55<br><sub>GA %28–79</sub> | ≤ %10 |
+| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 5/5 · %100 | %100 |
 | Gecikme (medyan)² | 25–41 sn | 22–36 sn | 23 sn | ≤ 60 sn |
 | Gecikme (p95)² | 30–48 sn | 28–45 sn | 36 sn | — |
 
-**Genelleme farkı: 3,5 puan.** Hiç görülmemiş 29 soruda skor %96,6'dan %93,1'e düştü. Bu küçük fark, sistemin test setine ezberlemediğini gösterir.
+### Bu sayılar ne kadar kesin? — örneklem uyarısı
 
-Daha önemlisi: **ret doğruluğu her iki sette de %100.** Ayrılmış setteki 5 "reddedilmesi zorunlu" sorunun tamamı ve 4 tuzak sorunun tamamı doğru davranışla sonuçlandı. Sistemin var oluş amacı olan davranış — bilmediğinde uydurmamak — görülmemiş sorulara tam olarak aktarılıyor.
+29 soruluk bir sette **bir soru 3,4 puandır.** "%96,6" ile "%93,1" arasındaki fark tam olarak bir sorudur; virgülden sonraki basamak, var olmayan bir hassasiyet iddia eder. Bu yüzden tüm oranlar **sayım ve %95 Wilson güven aralığıyla** birlikte veriliyor (`eval/stats.py`).
+
+Sonuç ikiye ayrılıyor ve ikisi de dürüstçe söylenmeli:
+
+| Karşılaştırma | Aralıklar | Yorum |
+|---|---|---|
+| Geliştirme (%83–99) ↔ **Ayrılmış** (%78–98) | **örtüşüyor** | 3,5 puanlık "genelleme farkı" bu örneklemle **ölçüm gürültüsünden ayırt edilemez** |
+| Geliştirme (%83–99) ↔ **Taranmış** (%33–77) | **örtüşmüyor** | OCR'ın maliyeti **istatistiksel olarak gerçek** bir etki |
+
+Yani ayrılmış set için söylenebilecek dürüst şey "sistem genelliyor" değil, **"aşırı uyuma dair kanıt bulunamadı"**dır. Aradaki fark önemlidir: ikincisi verinin desteklediği, birincisi desteklemediği iddiadır. Farkı gerçekten ölçmek için çok daha büyük bir set gerekir.
+
+Buna karşılık OCR etkisi net: aralıklar örtüşmüyor, yani 40 puanlık düşüş rastlantı değil.
+
+Wilson aralığı bilinçli seçildi; klasik (Wald) yaklaşımı küçük örneklemde ve oran 1'e yakınken bozulur — 28/29 için üst sınırı %100'ün üstüne çıkarır, 29/29 için ise "hiç belirsizlik yok" der.
+
+### Ret doğruluğu
+
+**Her iki sette de %100.** Ayrılmış setteki 5 "reddedilmesi zorunlu" sorunun tamamı ve 4 tuzak sorunun tamamı doğru davranışla sonuçlandı. Sistemin var oluş amacı olan davranış — bilmediğinde uydurmamak — görülmemiş sorulara tam olarak aktarılıyor.
 
 Ayrılmış setteki iki hatanın **ikisi de aynı sınıftan** ve geliştirme setindeki tek hatayla aynı: doğru kaynak getirilmiş, model onu kullanmayı reddetmiş.
 
@@ -500,6 +516,7 @@ belge-asistani/
 |---|---|---|
 | PDF (dijital) | `.pdf` | Sayfa numarası atıfta gösterilir; tablolar satır bütünlüğü korunarak okunur |
 | PDF (taranmış) | `.pdf` | **Otomatik OCR** — bkz. §5.4 |
+| Taranmış görüntü | `.jpg` `.jpeg` `.png` `.tif` `.tiff` `.bmp` `.webp` | **OCR zorunlu** — görüntüde metin katmanı yoktur. Çok sayfalı TIFF desteklenir; düşük çözünürlüklü görüntüler OCR öncesi büyütülür |
 | Word | `.docx` | Paragraf ve tablo numarası korunur |
 | Excel | `.xlsx` `.xlsm` `.xls` | Satır bazlı parçalama, birleştirilmiş hücreler yayılır |
 | Metin | `.txt` `.md` | Kodlama otomatik tespit edilir |
@@ -528,6 +545,10 @@ python server.py        # veya: uvicorn server:app --host 127.0.0.1 --port 8501
 ### 5.4 Taranmış PDF'ler — OCR
 
 Fotokopi/tarayıcı çıktısı PDF'lerde metin katmanı yoktur. Sistem bunu **sayfa bazında** tespit eder ve yalnızca o sayfalara OCR uygular; dijital sayfalar hızlı yoldan okunmaya devam eder (karma belgeler desteklenir).
+
+**Doğrudan görüntü dosyaları** (`.jpg`, `.png`, `.tiff` …) da desteklenir — kurumsal taramalar sıklıkla PDF değil JPG olarak gelir ya da telefonla fotoğraflanır. PDF'ten önemli bir farkı vardır: görüntüde metin katmanı **hiç yoktur**, dolayısıyla OCR yedek bir yol değil tek yoldur. Bu yüzden Tesseract kurulu değilse dosya sessizce atlanmaz, açık hata verilir — aksi hâlde kullanıcı "belge indekslendi ama hiçbir soruya cevap gelmiyor" durumunda kalırdı.
+
+Düşük çözünürlüklü görüntüler OCR öncesi otomatik büyütülür: karakter yüksekliği ~20 pikselin altına düştüğünde Tesseract belirgin şekilde bozulur. Büyütmek bilgi eklemez ama harf ayrıştırmasını kolaylaştırır.
 
 Python paketleri `requirements.txt` içindedir, ancak **Tesseract motoru ayrıca kurulmalıdır**:
 

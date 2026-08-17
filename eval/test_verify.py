@@ -2,7 +2,8 @@
 HIZLI BİRİM TESTLERİ
 ====================
 Kapsam: guardrail (src/verify.py) · değerlendirme ölçütü (eval/matching.py)
-        · OCR içerik kaybı (src/ocr.py) · belge okuma (src/loaders.py)
+        · örneklem istatistiği (eval/stats.py) · OCR içerik kaybı (src/ocr.py)
+        · belge okuma (src/loaders.py)
 
 Buradaki her durum GERÇEK bir hatadan doğdu. Değerlendirme koşuları
 (run_eval.py) LLM gerektirir ve ~15 dakika sürer; bu testler saniyeler
@@ -154,7 +155,33 @@ def _boilerplate_testleri() -> List[Tuple[str, bool]]:
     # Az sayfalı belgede tespit yapılmamalı (güvenilir değil)
     az = _detect_boilerplate(_SAYFALAR[:2])
 
+    # --- Görüntü dosyası desteği (JPG/PNG/TIFF) ---
+    from src.loaders import (IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS,
+                             _DISPATCH, load_image)
+    import tempfile
+
+    kayitli = IMAGE_EXTENSIONS <= SUPPORTED_EXTENSIONS
+    dispatch_tam = all(e in _DISPATCH for e in IMAGE_EXTENSIONS)
+
+    # OCR kapalıyken SESSİZ geçilmemeli: görüntüde metin katmanı yoktur,
+    # OCR olmadan dosya hiç okunamaz. Sessizce boş dönmek kullanıcıyı
+    # "belge indekslendi ama cevap yok" durumunda bırakır.
+    with tempfile.TemporaryDirectory() as d:
+        sahte = Path(d) / "tarama.jpg"
+        sahte.write_bytes(b"bu gecerli bir jpeg degil")
+        try:
+            load_image(sahte, ocr_options={"enabled": False})
+            kapali_hata = False
+            mesaj = ""
+        except RuntimeError as exc:
+            kapali_hata = True
+            mesaj = str(exc)
+
     return [
+        ("görüntü uzantıları desteklenenlere eklendi", kayitli),
+        ("görüntü uzantıları dağıtıcıda kayıtlı", dispatch_tam),
+        ("🔒 OCR kapalıyken görüntü SESSİZ geçilmiyor, hata veriyor",
+         kapali_hata and "ocr.enabled" in mesaj),
         ("altbilgi tespit edildi", len(bp) == 1),
         ("altbilgi tüm sayfalardan atıldı",
          all("Sayfa" not in t.splitlines()[0] for t in temiz)),
@@ -163,6 +190,40 @@ def _boilerplate_testleri() -> List[Tuple[str, bool]]:
         ("🔒 sayfa ORTASINDAKİ aynı ifade korundu",
          "ibaresi burada içeriktir" in orta_temiz),
         ("🔒 2 sayfalık belgede tespit yapılmadı", az == set()),
+    ]
+
+
+# =====================================================================
+#  ÖRNEKLEM İSTATİSTİĞİ — Wilson güven aralığı (eval/stats.py)
+# ---------------------------------------------------------------------
+#  29 soruluk sette bir soru 3,4 puan. Tek başına yüzde, var olmayan bir
+#  hassasiyet iddia eder. Wilson aralığı seçildi çünkü klasik (Wald)
+#  yaklaşımı küçük örneklemde ve oran 1'e yakınken [0,1] dışına taşar.
+# =====================================================================
+
+def _istatistik_testleri() -> List[Tuple[str, bool]]:
+    from stats import oran_ozeti, ortusuyor_mu, wilson_interval
+
+    lo28, hi28 = wilson_interval(28, 29)
+    gel, ayr = oran_ozeti(28, 29), oran_ozeti(27, 29)
+    tar = oran_ozeti(9, 16)
+
+    # Sınır durumları: Wald aralığı burada [0,1] dışına taşar
+    tam = wilson_interval(29, 29)
+    sifir = wilson_interval(0, 29)
+
+    return [
+        ("bilinen değer doğru (28/29 → %83-99)",
+         round(lo28, 3) == 0.828 and round(hi28, 3) == 0.994),
+        ("🔒 tam başarıda üst sınır %100'ü aşmıyor",
+         tam[1] <= 1.0 and tam[0] < 1.0),
+        ("🔒 sıfır başarıda alt sınır negatif değil",
+         sifir[0] >= 0.0 and sifir[1] > 0.0),
+        ("🔒 boş örneklem çökmüyor", wilson_interval(0, 0) == (0.0, 0.0)),
+        ("geliştirme ↔ ayrılmış aralıkları ÖRTÜŞÜYOR (fark gürültüden ayırt edilemez)",
+         ortusuyor_mu(gel, ayr)),
+        ("geliştirme ↔ taranmış aralıkları ÖRTÜŞMÜYOR (OCR etkisi gerçek)",
+         not ortusuyor_mu(gel, tar)),
     ]
 
 
@@ -266,11 +327,12 @@ def _olcut_testleri() -> List[Tuple[str, bool]]:
 
 def main() -> int:
     olcut_testleri = _olcut_testleri()
+    ist_testleri = _istatistik_testleri()
     ocr_testleri = _icerik_kaybi_testleri()
     bp_testleri = _boilerplate_testleri()
     gecen = 0
-    toplam = (len(DURUMLAR) + len(olcut_testleri) + len(ocr_testleri)
-              + len(bp_testleri))
+    toplam = (len(DURUMLAR) + len(olcut_testleri) + len(ist_testleri)
+              + len(ocr_testleri) + len(bp_testleri))
     print(f"{toplam} birim testi çalıştırılıyor...\n")
 
     print("-- guardrail (src/verify.py) " + "-" * 34)
@@ -288,6 +350,11 @@ def main() -> int:
 
     print("\n-- değerlendirme ölçütü (eval/matching.py) " + "-" * 20)
     for ad, sonuc in olcut_testleri:
+        gecen += bool(sonuc)
+        print(f" {'✔' if sonuc else '✖'} {ad}")
+
+    print("\n-- örneklem istatistiği (eval/stats.py) " + "-" * 23)
+    for ad, sonuc in ist_testleri:
         gecen += bool(sonuc)
         print(f" {'✔' if sonuc else '✖'} {ad}")
 

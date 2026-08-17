@@ -47,6 +47,7 @@ from src.rag_engine import RAGEngine  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from matching import normalize, value_in  # noqa: E402
+from stats import bicimle, oran_ozeti  # noqa: E402
 
 
 # LLM erişilemediğinde motorun kullanıcıya döndürdüğü hata metninin izleri.
@@ -160,18 +161,37 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     answerable = [r for r in rows if r["type"] not in ("must_refuse", "trap")]
     lat = sorted(r["elapsed_s"] for r in rows) or [0]
 
-    def pct(part: List, whole: List) -> float:
-        return round(100.0 * len(part) / len(whole), 1) if whole else 0.0
-
+    # ORANLAR SAYIMLA VE GÜVEN ARALIĞIYLA BİRLİKTE VERİLİR.
+    # 29 soruluk bir sette bir soru 3,4 puandır; "%96,6" gibi tek başına bir
+    # yüzde, var olmayan bir hassasiyet iddia eder. Wilson aralığı, sayının
+    # ne kadar oynak olduğunu dürüstçe gösterir.
     return {
         "toplam_soru": len(rows),
-        "genel_basari_%": pct([r for r in rows if r["passed"]], rows),
-        "ret_dogrulugu_%": pct([r for r in must_refuse if r["refused"]], must_refuse),
-        "yanlis_ret_%": pct([r for r in answerable if r["refused"]], answerable),
-        "kaynakli_yanit_%": pct([r for r in answerable if r["sources"]], answerable),
+        "genel_basari": oran_ozeti(len([r for r in rows if r["passed"]]), len(rows)),
+        "ret_dogrulugu": oran_ozeti(len([r for r in must_refuse if r["refused"]]),
+                                    len(must_refuse)),
+        "yanlis_ret": oran_ozeti(len([r for r in answerable if r["refused"]]),
+                                 len(answerable)),
+        "kaynakli_yanit": oran_ozeti(len([r for r in answerable if r["sources"]]),
+                                     len(answerable)),
         "gecikme_p50_s": round(statistics.median(lat), 2),
         "gecikme_p95_s": round(lat[max(0, int(len(lat) * 0.95) - 1)], 2),
     }
+
+
+def print_summary(summary: Dict[str, Any]) -> None:
+    """Özeti sayım + yüzde + güven aralığı ile yazdırır."""
+    print("=" * 66)
+    print(f"  {'toplam_soru':<18}: {summary['toplam_soru']}")
+    for anahtar in ("genel_basari", "ret_dogrulugu", "yanlis_ret", "kaynakli_yanit"):
+        print(f"  {anahtar:<18}: {bicimle(summary[anahtar])}")
+    print(f"  {'gecikme_p50_s':<18}: {summary['gecikme_p50_s']}")
+    print(f"  {'gecikme_p95_s':<18}: {summary['gecikme_p95_s']}")
+    print("=" * 66)
+    print("  GA = %95 Wilson güven aralığı. Küçük örneklemde yüzdeler oynaktır;")
+    print("  aralıkları örtüşen iki sonuç arasındaki fark, bu veriyle")
+    print("  ölçüm gürültüsünden ayırt edilemez.")
+    print("=" * 66)
 
 
 def run_once(engine: RAGEngine, cases: List[Dict], verbose: bool = True) -> Dict[str, Any]:
@@ -235,7 +255,8 @@ def sweep(engine: RAGEngine, cases: List[Dict]) -> List[Dict[str, Any]]:
         row = {**params, **res["summary"]}
         print(json.dumps(row, ensure_ascii=False))
         out.append(row)
-    out.sort(key=lambda r: (r["genel_basari_%"], -r["yanlis_ret_%"]), reverse=True)
+    out.sort(key=lambda r: (r["genel_basari"]["yuzde"],
+                            -r["yanlis_ret"]["yuzde"]), reverse=True)
     return out
 
 
@@ -313,10 +334,8 @@ def main() -> int:
             payload: Any = table
         else:
             result = run_once(engine, cases)
-            print("\n" + "=" * 62)
-            for k, v in result["summary"].items():
-                print(f"  {k:<22}: {v}")
-            print("=" * 62)
+            print()
+            print_summary(result["summary"])
             payload = result
     except EvalAborted as exc:
         print("\n" + "=" * 62)

@@ -19,8 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
+
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md",
-                        ".csv", ".tsv", ".xlsx", ".xlsm", ".xls"}
+                        ".csv", ".tsv", ".xlsx", ".xlsm", ".xls"} | IMAGE_EXTENSIONS
 
 
 @dataclass
@@ -638,8 +640,104 @@ def load_xlsx(path: Path, rows_per_chunk: int = 1) -> List[Block]:
     return blocks
 
 
+def load_image(path: Path,
+               split_table_rows: bool = True,
+               ocr_options: Optional[Dict[str, object]] = None,
+               progress=None,
+               warnings: Optional[List[Dict[str, object]]] = None) -> List[Block]:
+    """
+    Taranmış görüntü dosyasını (JPG/PNG/TIFF/BMP) okur.
+
+    PDF'TEN TEMEL FARKI: görüntüde metin katmanı YOKTUR. PDF'te OCR bir
+    yedek yoldur — önce metin katmanı denenir, boşsa OCR devreye girer.
+    Görüntüde ise OCR tek yoldur; Tesseract yoksa dosya hiç okunamaz ve
+    bunun sessizce geçilmesi kullanıcıyı yanıltır ("belge indekslendi ama
+    hiçbir soruya cevap yok"). Bu yüzden burada açıkça hata veriyoruz.
+
+    Kurumsal belgeler sıklıkla PDF değil doğrudan JPG/PNG olarak taranır ya
+    da telefonla fotoğraflanır; bu yol o dosyalar içindir.
+    """
+    from . import ocr as ocr_mod
+
+    opts = ocr_options or {}
+    if not bool(opts.get("enabled", True)):
+        raise RuntimeError(
+            f"'{path.name}' bir görüntü dosyası ve OCR kapalı. "
+            "config.yaml → ocr.enabled: true yapın."
+        )
+
+    ok, reason = ocr_mod.availability(opts.get("tesseract_cmd") or None)
+    if not ok:
+        raise RuntimeError(f"'{path.name}' görüntü dosyası okunamadı. {reason}")
+
+    lang = str(opts.get("language", "tur+eng"))
+    preprocess = bool(opts.get("preprocess", True))
+    preserve_spaces = bool(opts.get("preserve_spaces", True))
+
+    if progress:
+        progress(f"{path.name}: görüntü OCR ile okunuyor…")
+
+    try:
+        sonuclar = ocr_mod.ocr_image_file(
+            path, lang=lang, preprocess=preprocess,
+            preserve_spaces=preserve_spaces)
+    except Exception as exc:
+        raise RuntimeError(
+            f"'{path.name}' görüntüsü açılamadı ({type(exc).__name__}: {exc})")
+
+    blocks: List[Block] = []
+    order = 0
+    low_quality: List[Dict[str, object]] = []
+    en_iyi = max((s.get("chars_per_ink", 0.0) for _, s in sonuclar), default=0.0)
+
+    for idx, (ham, stat) in enumerate(sonuclar, start=1):
+        text = clean_text(ham)
+        # Çok sayfalı TIFF dışında "sayfa" kavramı yok; tek kareli dosyada
+        # konum etiketi sayfa numarası içermez, kullanıcıyı yanıltmasın.
+        locator = f"Sayfa {idx}" if len(sonuclar) > 1 else "Görüntü"
+
+        skor, sorunlar = ocr_mod.assess_content_loss(
+            stat, doc_best=en_iyi,
+            floor=float(opts.get("min_chars_per_ink", 3.0)))
+        k_skor, k_sorunlar = ocr_mod.assess_quality(text)
+        tum = list(sorunlar) + list(k_sorunlar)
+        if tum:
+            low_quality.append({"page": idx, "score": round(min(skor, k_skor), 2),
+                                "issues": tum})
+
+        if not text:
+            continue
+
+        if split_table_rows:
+            row_blocks = _split_page_rows(text, idx, order)
+            if row_blocks:
+                order = row_blocks[-1].order
+                for b in row_blocks:
+                    b.extra.setdefault("ocr", "1")
+                    if len(sonuclar) == 1:
+                        b.locator = b.locator.replace("Sayfa 1", "Görüntü")
+                blocks.extend(row_blocks)
+                continue
+
+        order += 1
+        blocks.append(Block(text=text, page=idx, locator=locator,
+                            order=order, extra={"ocr": "1"}))
+
+    if warnings is not None and low_quality:
+        warnings.extend(low_quality)
+
+    if not blocks:
+        raise RuntimeError(
+            f"'{path.name}' görüntüsünden metin çıkarılamadı. Tarama çok "
+            "soluk veya düşük çözünürlüklü olabilir; daha yüksek çözünürlükte "
+            "yeniden tarayın."
+        )
+    return blocks
+
+
 _DISPATCH = {
     ".pdf": load_pdf,
+    **{e: load_image for e in IMAGE_EXTENSIONS},
     ".docx": load_docx,
     ".txt": load_text,
     ".md": load_text,
@@ -666,6 +764,10 @@ def load_document(path: Path,
         return load_pdf(path, split_table_rows=pdf_split_table_rows,
                         ocr_options=ocr_options, progress=progress,
                         warnings=warnings)
+    if ext in IMAGE_EXTENSIONS:
+        return load_image(path, split_table_rows=pdf_split_table_rows,
+                          ocr_options=ocr_options, progress=progress,
+                          warnings=warnings)
     if ext in _TABLE_LOADERS:
         return _DISPATCH[ext](path, table_rows_per_chunk)  # type: ignore[call-arg]
     return _DISPATCH[ext](path)
