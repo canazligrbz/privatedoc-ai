@@ -45,6 +45,39 @@ from .prompts import (
 
 CITATION_RE = re.compile(r"\[K\s*(\d{1,2})\]")
 
+# Bağlam bütçesi hesabında kullanılan sabitler
+_BUDGET_TEMPLATE_CHARS = 400    # kullanıcı promptu şablonunun kendi payı
+_BUDGET_SAFETY_TOKENS = 96      # tokenizasyon sapmasına karşı emniyet payı
+_BUDGET_MIN_CHARS = 600         # bu değerin altında hiç kaynak sığmaz
+
+
+def fit_char_budget(configured: int,
+                    num_ctx: int,
+                    num_predict: int,
+                    chars_per_token: float,
+                    system_prompt_len: int,
+                    question_len: int) -> int:
+    """
+    Kaynaklara ayrılabilecek GERÇEK karakter sayısını hesaplar.
+
+    num_ctx = sistem promptu + kaynaklar + soru + üretilecek yanıt.
+    Yapılandırmadaki `context_char_budget` bunu bilmez; sistem promptu
+    büyüdüğünde toplam sessizce pencereyi aşar. Gerçek bir hatada tam olarak
+    bu oldu: prompt zamanla 4000 karaktere ulaştı, Ollama sessizce kırptı ve
+    model AYNI SORUYA FARKLI CEVAP vermeye başladı.
+
+    Saf fonksiyon olarak ayrıldı — RAGEngine örneği (ve dolayısıyla model
+    yükleme) gerektirmeden sınanabilsin diye.
+
+    Alt sınır bilinçli: bütçe sıfıra inerse hiç kaynak gönderilmez ve sistem
+    her soruyu reddeder. Böyle bir durumda az kaynakla denemek, hiç denememeye
+    yeğdir.
+    """
+    overhead = system_prompt_len + question_len + _BUDGET_TEMPLATE_CHARS
+    available_tokens = num_ctx - num_predict - _BUDGET_SAFETY_TOKENS
+    available_chars = int(available_tokens * chars_per_token) - overhead
+    return max(_BUDGET_MIN_CHARS, min(configured, available_chars))
+
 
 # ============================================================ veri yapıları
 
@@ -398,7 +431,7 @@ class RAGEngine:
             pairs = [(question, c["text"]) for c in kept]
             scores = reranker.predict(
                 pairs, batch_size=int(self.cfg.get_path("reranker.batch_size", 4)))
-            for c, s in zip(kept, scores):
+            for c, s in zip(kept, scores, strict=True):
                 c["rerank_score"] = float(s)
             kept.sort(key=lambda c: c.get("rerank_score", 0.0), reverse=True)
             final_k = int(self.cfg.get_path("reranker.top_n", final_k))
@@ -528,24 +561,16 @@ class RAGEngine:
     # -------------------------------------------------- bağlam bütçesi
 
     def _fit_char_budget(self, question: str, configured: int) -> int:
-        """
-        Kaynaklara ayrılabilecek GERÇEK karakter sayısını hesaplar.
-
-        num_ctx = sistem promptu + kaynaklar + soru + üretilecek yanıt.
-        Yapılandırmadaki context_char_budget bunu bilmez; sistem promptu
-        büyüdüğünde toplam sessizce pencereyi aşabilir. Burada aşmayacak
-        şekilde daraltılır.
-        """
+        """Yapılandırmadan okur, saf hesabı fit_char_budget()'a devreder."""
         num_ctx = int(self.cfg.get_path("llm.num_ctx", 4096))
-        num_predict = int(self.cfg.get_path("llm.num_predict", 700))
-        # Türkçe'de kabaca 2.75 karakter = 1 token (ölçülmüş yaklaşık değer)
-        cpt = float(self.cfg.get_path("llm.chars_per_token", 2.75))
-
-        overhead_chars = len(SYSTEM_PROMPT) + len(question) + 400  # şablon payı
-        available_tokens = num_ctx - num_predict - 96               # emniyet payı
-        available_chars = int(available_tokens * cpt) - overhead_chars
-
-        budget = max(600, min(configured, available_chars))
+        budget = fit_char_budget(
+            configured=configured,
+            num_ctx=num_ctx,
+            num_predict=int(self.cfg.get_path("llm.num_predict", 700)),
+            chars_per_token=float(self.cfg.get_path("llm.chars_per_token", 2.75)),
+            system_prompt_len=len(SYSTEM_PROMPT),
+            question_len=len(question),
+        )
         if budget < configured:
             self._last_budget_note = (
                 f"Bağlam bütçesi {configured} → {budget} karaktere daraltıldı "

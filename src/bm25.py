@@ -248,7 +248,9 @@ def rrf_fuse(rankings: Iterable[Sequence[str]], k: int = 60,
     lists = list(rankings)
     w = list(weights) if weights else [1.0] * len(lists)
     fused: Dict[str, float] = {}
-    for wi, ids in zip(w, lists):
+    # strict=True: ağırlık sayısı sıralama sayısıyla uyuşmazsa SESSİZCE
+    # bir sıralamayı düşürmek yerine hata verilir.
+    for wi, ids in zip(w, lists, strict=True):
         for rank, _id in enumerate(ids, start=1):
             fused[_id] = fused.get(_id, 0.0) + wi / (k + rank)
     return fused

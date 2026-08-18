@@ -248,7 +248,7 @@ def sweep(engine: RAGEngine, cases: List[Dict]) -> List[Dict[str, Any]]:
     out = []
     keys = list(grid)
     for combo in itertools.product(*(grid[k] for k in keys)):
-        params = dict(zip(keys, combo))
+        params = dict(zip(keys, combo, strict=True))
         CFG["retrieval"].update(params)
         print(f"\n=== {params} ===")
         res = run_once(engine, cases, verbose=False)

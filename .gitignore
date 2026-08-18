@@ -13,6 +13,7 @@ venv/
 env/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 .mypy_cache/
 
 # --- KURUMSAL VERİ — ASLA COMMIT EDİLMEZ ---

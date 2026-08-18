@@ -1,0 +1,79 @@
+# =====================================================================
+#  CI — her push ve pull request'te otomatik kontrol
+# ---------------------------------------------------------------------
+#  NE ÇALIŞIR?
+#    1. Birim testleri (pytest)      — 116 test, ~1 sn
+#    2. Sızıntı taraması             — kurum/kişi bilgisi depoya kaçmasın
+#    3. Kod denetimi (ruff)          — kullanılmayan import, sözdizimi kokuları
+#
+#  NE ÇALIŞMAZ?
+#    LLM, embedding modeli, vektör veri tabanı ve indeks gerektiren hiçbir şey.
+#    Birim testleri bilerek saf fonksiyonlar üzerine yazıldı; bu sayede CI'da
+#    ~2,3 GB'lık torch/chromadb kurulmuyor ve koşu saniyeler sürüyor.
+#    Uçtan uca doğruluk ölçümü (eval/run_eval.py) yerel makinede, Ollama ile
+#    çalıştırılır — CI'da modeli barındırmak ne mümkün ne anlamlı.
+#
+#  AIR-GAP NOTU: Burada yalnızca KAYNAK KOD işlenir. Belgeler, indeks,
+#  günlükler ve model dosyaları .gitignore ile depo dışındadır; GitHub'ın
+#  sunucusuna hiçbir kurumsal veri gitmez.
+# =====================================================================
+
+name: testler
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Projenin desteklediği aralığın iki ucu. 3.12 önemli: kullanıcının
+        # sistem Python'u bu sürüm ve sanal ortam karışıklığı bir kez gerçek
+        # bir hataya yol açtı.
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python ${{ matrix.python-version }} kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Bağımlılıklar (hafif — torch/chromadb yok)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Birim testleri
+        run: pytest
+
+      - name: Sızıntı taraması (kurum/kişi bilgisi)
+        run: python scripts/check_leaks.py
+
+      - name: Kod denetimi
+        run: ruff check src eval scripts tests server.py
+
+      - name: Hassas dosyalar depoya girmiş mi?
+        # .gitignore'a güvenmek yetmez; bir kez elle "git add -f" yapılması
+        # kurumsal belgeyi depoya sokar. Bu kontrol o ihtimali kapatır.
+        #
+        # NOT: grep -E negatif ileri bakış (?!...) DESTEKLEMEZ; .gitkeep
+        # istisnası ayrı bir grep -v ile eleniyor. İlk sürümde bu kullanıldı
+        # ve kontrol yanlış alarm veriyordu.
+        run: |
+          bulunan=$(git ls-files \
+            | grep -E '^(data/|logs/|models/)' \
+            | grep -v '^data/documents/\.gitkeep$' || true)
+          if [ -n "$bulunan" ]; then
+            echo "::error::Hassas dosya depoya eklenmiş:"
+            echo "$bulunan"
+            exit 1
+          fi
+          echo "✔ data/, logs/ ve models/ depo dışında"

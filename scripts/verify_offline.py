@@ -270,7 +270,7 @@ def t_ram():
     if total >= need:
         return "warn", (msg + " | Fiziksel RAM yeterli ama şu an dolu. "
                         "Diğer uygulamaları kapatıp tekrar deneyin.")
-    return False, (msg + f" | YETERSİZ. config.yaml → llm.num_ctx=4096 yapın veya "
+    return False, (msg + " | YETERSİZ. config.yaml → llm.num_ctx=4096 yapın veya "
                    "daha küçük modele geçin: ollama pull qwen2.5:3b-instruct-q4_K_M")
 
 

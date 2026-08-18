@@ -1,0 +1,33 @@
+# =====================================================================
+# RUFF — kod denetimi yapılandırması
+# ---------------------------------------------------------------------
+# Kural kümesi BİLİNÇLİ OLARAK DAR tutuldu. Amaç biçim tartışması değil,
+# GERÇEK HATA yakalamaktır:
+#
+#   F  (pyflakes)     tanımsız isim, kullanılmayan import/değişken
+#   E9 (sözdizimi)    ayrıştırma hataları
+#   B  (bugbear)      sessizce hataya dönüşen kalıplar (değişken varsayılan,
+#                     döngü içinde yakalanmayan istisna gibi)
+#
+# Satır uzunluğu (E501) KAPALI: bu depodaki yorumlar Türkçe ve açıklayıcı;
+# 79 karaktere sığdırmak için cümle bölmek okunabilirliği düşürür.
+# =====================================================================
+
+line-length = 100
+target-version = "py310"
+
+exclude = [".venv", "models", "data", "logs", "offline_bundle", "wheelhouse"]
+
+[lint]
+select = ["F", "E9", "B"]
+ignore = [
+    "B008",  # argüman varsayılanında fonksiyon çağrısı — FastAPI'de standart
+             # kullanım: Body(...), File(...), Depends(...)
+]
+
+[lint.per-file-ignores]
+# Air-gap koruması, ağır importlardan ÖNCE devreye girmek zorunda; bu yüzden
+# bu dosyalarda importlar dosya başında toplanamaz (E402 kaçınılmaz).
+"server.py" = ["E402"]
+"eval/run_eval.py" = ["E402"]
+"scripts/verify_offline.py" = ["E402"]

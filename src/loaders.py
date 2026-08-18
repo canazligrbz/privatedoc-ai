@@ -250,7 +250,7 @@ def load_pdf(path: Path,
         try:
             reader.decrypt("")  # boş parolalı koruma
         except Exception as exc:
-            raise RuntimeError(f"Şifreli PDF açılamadı: {path.name} ({exc})")
+            raise RuntimeError(f"Şifreli PDF açılamadı: {path.name} ({exc})") from exc
 
     total = len(reader.pages)
     order = 0
@@ -350,7 +350,8 @@ def load_pdf(path: Path,
     # 2. GEÇİŞ — tekrarlayan üstbilgi/altbilgi satırlarını ayıkla, sonra parçala.
     boilerplate = _detect_boilerplate(sayfa_metinleri)
 
-    for idx, (text, sayfa_ocrlu) in enumerate(zip(sayfa_metinleri, sayfa_ocr), start=1):
+    for idx, (text, sayfa_ocrlu) in enumerate(
+            zip(sayfa_metinleri, sayfa_ocr, strict=True), start=1):
         text = _strip_boilerplate(text, boilerplate)
         if not text:
             continue
@@ -568,11 +569,11 @@ def load_xls(path: Path, rows_per_chunk: int = 1) -> List[Block]:
     """Eski Excel biçimi (.xls). openpyxl bu biçimi okuyamaz, xlrd gerekir."""
     try:
         import xlrd  # type: ignore
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
             f"'{path.name}' eski Excel biçimi (.xls). Okumak için 'xlrd' paketi gerekir: "
             "pip install xlrd   —  ya da dosyayı Excel'de açıp .xlsx olarak kaydedin."
-        )
+        ) from exc
 
     book = xlrd.open_workbook(str(path))
     blocks: List[Block] = []
@@ -683,7 +684,8 @@ def load_image(path: Path,
             preserve_spaces=preserve_spaces)
     except Exception as exc:
         raise RuntimeError(
-            f"'{path.name}' görüntüsü açılamadı ({type(exc).__name__}: {exc})")
+            f"'{path.name}' görüntüsü açılamadı "
+            f"({type(exc).__name__}: {exc})") from exc
 
     blocks: List[Block] = []
     order = 0

@@ -307,7 +307,10 @@ def ingest(cfg: Optional[Config] = None,
                 table_rows_per_chunk=int(cfg.get_path("retrieval.table_rows_per_chunk", 1)),
                 pdf_split_table_rows=bool(cfg.get_path("retrieval.pdf_split_table_rows", True)),
                 ocr_options=cfg.get_path("ocr", {}) or {},
-                progress=lambda m: (log("    " + m), progress(pct, m)),
+                # pct DÖNGÜ DEĞİŞKENİ: varsayılan argümanla bağlanıyor. Referansla
+                # yakalanırsa, geri çağırım saklanıp sonra çalıştırıldığında
+                # yanlış ilerleme değerini kullanır.
+                progress=lambda m, _p=pct: (log("    " + m), progress(_p, m)),
                 warnings=ocr_warnings,
             )
             if any((b.extra or {}).get("ocr") for b in blocks):

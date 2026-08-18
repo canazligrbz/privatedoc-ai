@@ -1,0 +1,26 @@
+# =====================================================================
+# GELİŞTİRME / CI BAĞIMLILIKLARI
+# ---------------------------------------------------------------------
+# Bu dosya requirements.txt'in HAFİF bir alt kümesidir.
+#
+# Birim testleri bilerek saf fonksiyonlar üzerine yazıldı: LLM, embedding
+# modeli, vektör veri tabanı ve indeks GEREKTİRMEZLER. Bu sayede CI'da
+# ~2,3 GB'lık torch ve chromadb kurulmasına gerek kalmıyor; testler
+# saniyeler içinde koşuyor.
+#
+# Kurulum:
+#     pip install -r requirements-dev.txt
+# Çalıştırma:
+#     pytest
+# =====================================================================
+
+pytest==8.3.3
+
+# Kod denetimi (lint) — biçim ve kullanılmayan import/değişken yakalar
+ruff==0.7.4
+
+# --- Testlerin gerçekten kullandığı üretim bağımlılıkları ---
+PyYAML==6.0.2          # yapılandırma okuma
+pypdf==5.1.0           # loaders (PDF yolu)
+pillow==11.0.0         # ocr (görüntü ölçümü)
+numpy==1.26.4          # ocr (mürekkep oranı)

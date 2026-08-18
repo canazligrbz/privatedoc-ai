@@ -1,5 +1,7 @@
 # Belge Asistanı — Yerel (Air-Gap) RAG Sistemi
 
+![testler](https://github.com/canazligrbz/privatedoc-ai/actions/workflows/test.yml/badge.svg)
+
 İnternete hiç çıkmadan çalışan, yalnızca size ait belgelere dayanarak yanıt veren, **her cümlesinde kaynak gösteren** ve bilmediğinde bilmediğini söyleyen bir RAG (Retrieval-Augmented Generation) uygulaması.
 
 Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalışır. Uygulama süreci localhost dışına hiçbir bağlantı kuramaz; bu bir yapılandırma tercihi değil, kod seviyesinde zorlanan bir kısıttır (`src/airgap.py`).
@@ -222,8 +224,8 @@ python eval/run_eval.py --testset eval/testset_depo.yaml
 python -m src.ingest --rebuild --path ornek_belgeler/taranmis
 python eval/run_eval.py --testset eval/testset_taranmis.yaml
 
-# Guardrail birim testleri (LLM gerekmez, saniyeler sürer)
-python eval/test_verify.py
+# Birim testleri (LLM gerekmez, ~1 saniye)
+pytest
 ```
 
 ### Geliştirme boyunca ilerleme
@@ -267,7 +269,7 @@ cevap : "... asgari ücretin yüzde 55 fazlası ödenecektir."      → %89 ört
 
 Tek fark `kaç` → `55`, yani cevabın kendisi. Ayıklayıcı bunu yankı sanıp sildi ve iki soru daha bozuldu. Ölçüt orandan **"soruda geçmeyen tek bir içerik terimi var mı"**ya çevrildi. Yön tercihi bilinçlidir: bir yankıyı kaçırmak zayıf bir yanıt üretir, doğru cevabı silmek yanlış bir ret üretir — ikincisi daha pahalıdır.
 
-Bu mantığın gerilemesini önlemek için 15 birim testi yazıldı (`eval/test_verify.py`), LLM gerektirmez, saniyeler sürer. Bir kısmı düzeltmeleri, `🔒` işaretli olanlar guardrail'in **asıl görevini** korur: bir değişiklik uydurma sayı testlerini bozuyorsa o değişiklik yanlıştır.
+Bu mantığın gerilemesini önlemek için birim testleri yazıldı (`tests/`, pytest). LLM gerektirmezler ve yarım saniyede koşarlar. Bir kısmı düzeltmeleri, `🔒` işaretli olanlar guardrail'in **asıl görevini** korur: bir değişiklik uydurma sayı testlerini bozuyorsa o değişiklik yanlıştır.
 
 ### Bilinen sınır — ay adı ↔ ay numarası eşleştirmesi
 
@@ -495,10 +497,23 @@ belge-asistani/
 │
 ├── eval/
 │   ├── run_eval.py                 ➤ Doğruluk ölçümü + parametre taraması
-│   ├── test_verify.py              ➤ Guardrail birim testleri (LLM gerekmez)
+│   ├── matching.py                 ➤ Beklenti eşleştirme ölçütü
+│   ├── stats.py                    ➤ Wilson / Newcombe güven aralıkları
 │   ├── testset_depo.yaml           ➤ 29 soru — GELİŞTİRME seti
 │   ├── testset_holdout.yaml        ➤ 29 soru — AYRILMIŞ set (kilitli)
 │   └── testset_taranmis.yaml       ➤ 16 soru — taranmış sürüm (OCR maliyeti)
+│
+├── tests/                          ➤ 129 birim testi (pytest, LLM gerekmez)
+│   ├── test_guardrail.py           ➤ Atıf/sayı doğrulama katmanı
+│   ├── test_bm25.py                ➤ Türkçe arama uyarlamaları, RRF
+│   ├── test_eval_metrics.py        ➤ Ölçüm aletinin kendisi
+│   ├── test_context_budget.py      ➤ Bağlam penceresi taşması
+│   ├── test_ingest_incremental.py  ➤ SHA-256 artımlı indeksleme
+│   ├── test_leak_scanner.py        ➤ Sızıntı tarayıcısının kendisi
+│   ├── test_loaders_ocr.py         ➤ Boilerplate ayıklama, OCR içerik kaybı
+│   └── conftest.py                 ➤ import yolu ayarı
+│
+├── .github/workflows/test.yml      ➤ CI: her push'ta test + sızıntı taraması
 │
 ├── ornek_belgeler/
 │   ├── dijital/depo_sozlesmesi.pdf         ➤ 20 sayfa, temiz metin
