@@ -57,8 +57,18 @@ SIR_DESENLERI = [
 ATLA_UZANTI = {".pdf", ".jpg", ".jpeg", ".png", ".svg", ".bin", ".sqlite3",
                ".whl", ".gz", ".zip", ".ico", ".woff", ".woff2"}
 
-# Kendi desenlerini içerdiği için bu dosya taranmaz
-ATLA_DOSYA = {"scripts/check_leaks.py"}
+# Bu dosyalar YEM İÇERİR: tarayıcının kendisi desenleri tanımlar, testi de
+# yakalanması gereken örnekleri ("ETİ MADEN", sahte API anahtarı, yerel yol)
+# bilerek barındırır. Taranırlarsa tarayıcı kendi kendini suçlar ve CI hiç
+# yeşile dönmez.
+#
+# TAKAS: Bu iki dosya kör nokta olur. Kabul edilebilir, çünkü ikisi de yalnızca
+# test verisi içerir ve gerçek bir belgeye/yapılandırmaya dokunmaz. Alternatifi
+# (satır bazlı istisna işaretleri) daha kırılgan olurdu.
+ATLA_DOSYA_SONEKI = (
+    "scripts/check_leaks.py",
+    "tests/test_leak_scanner.py",
+)
 
 
 def tr_lower(s: str) -> str:
@@ -81,7 +91,8 @@ def dosyalari_bul(hepsi: bool) -> List[str]:
 def tara(dosyalar: List[str]) -> List[str]:
     bulgular: List[str] = []
     for yol in dosyalar:
-        if yol in ATLA_DOSYA or Path(yol).suffix.lower() in ATLA_UZANTI:
+        norm = yol.replace("\\", "/")
+        if norm.endswith(ATLA_DOSYA_SONEKI) or Path(yol).suffix.lower() in ATLA_UZANTI:
             continue
         try:
             icerik = Path(yol).read_text(encoding="utf-8")

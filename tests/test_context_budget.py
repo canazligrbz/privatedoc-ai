@@ -1,5 +1,5 @@
 """
-BAĞLAM PENCERESİ BÜTÇESİ — src/rag_engine.fit_char_budget
+BAĞLAM PENCERESİ BÜTÇESİ — src/budget.py
 
 NEDEN VAR?
 num_ctx = sistem promptu + kaynaklar + soru + üretilecek yanıt.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.rag_engine import _BUDGET_MIN_CHARS, fit_char_budget
+from src.budget import MIN_CHARS, fit_char_budget
 
 # Projenin gerçek varsayılanları
 VARSAYILAN = dict(num_ctx=4096, num_predict=700, chars_per_token=2.75,
@@ -59,7 +59,7 @@ def test_alt_sinir_korunur():
     """
     ayar = dict(num_ctx=1024, num_predict=900, chars_per_token=2.75,
                 system_prompt_len=4000, question_len=500)
-    assert fit_char_budget(configured=5500, **ayar) == _BUDGET_MIN_CHARS
+    assert fit_char_budget(configured=5500, **ayar) == MIN_CHARS
 
 
 def test_asla_yapilandirmadan_buyuk_olmaz():
@@ -82,5 +82,5 @@ def test_butce_pencereye_sigar(num_ctx):
 
     # Alt sınıra dayanmış durumlarda pencere zaten yetersizdir; orada
     # sığmama beklenen davranıştır (uyarı verilir, sistem yine de çalışır).
-    if butce > _BUDGET_MIN_CHARS:
+    if butce > MIN_CHARS:
         assert toplam_token <= num_ctx, f"num_ctx={num_ctx} aşıldı"

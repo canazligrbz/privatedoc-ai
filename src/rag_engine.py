@@ -33,6 +33,7 @@ import numpy as np
 from . import vectorstore
 from .config import Config, load_config
 from .embedder import embed_query
+from .budget import fit_char_budget
 from .llm_client import LLMUnavailable, LocalLLM
 from .prompts import (
     QUERY_REWRITE_PROMPT,
@@ -44,40 +45,6 @@ from .prompts import (
 )
 
 CITATION_RE = re.compile(r"\[K\s*(\d{1,2})\]")
-
-# Bağlam bütçesi hesabında kullanılan sabitler
-_BUDGET_TEMPLATE_CHARS = 400    # kullanıcı promptu şablonunun kendi payı
-_BUDGET_SAFETY_TOKENS = 96      # tokenizasyon sapmasına karşı emniyet payı
-_BUDGET_MIN_CHARS = 600         # bu değerin altında hiç kaynak sığmaz
-
-
-def fit_char_budget(configured: int,
-                    num_ctx: int,
-                    num_predict: int,
-                    chars_per_token: float,
-                    system_prompt_len: int,
-                    question_len: int) -> int:
-    """
-    Kaynaklara ayrılabilecek GERÇEK karakter sayısını hesaplar.
-
-    num_ctx = sistem promptu + kaynaklar + soru + üretilecek yanıt.
-    Yapılandırmadaki `context_char_budget` bunu bilmez; sistem promptu
-    büyüdüğünde toplam sessizce pencereyi aşar. Gerçek bir hatada tam olarak
-    bu oldu: prompt zamanla 4000 karaktere ulaştı, Ollama sessizce kırptı ve
-    model AYNI SORUYA FARKLI CEVAP vermeye başladı.
-
-    Saf fonksiyon olarak ayrıldı — RAGEngine örneği (ve dolayısıyla model
-    yükleme) gerektirmeden sınanabilsin diye.
-
-    Alt sınır bilinçli: bütçe sıfıra inerse hiç kaynak gönderilmez ve sistem
-    her soruyu reddeder. Böyle bir durumda az kaynakla denemek, hiç denememeye
-    yeğdir.
-    """
-    overhead = system_prompt_len + question_len + _BUDGET_TEMPLATE_CHARS
-    available_tokens = num_ctx - num_predict - _BUDGET_SAFETY_TOKENS
-    available_chars = int(available_tokens * chars_per_token) - overhead
-    return max(_BUDGET_MIN_CHARS, min(configured, available_chars))
-
 
 # ============================================================ veri yapıları
 
