@@ -17,6 +17,62 @@ from typing import List
 REFUSAL = "Bu konu hakkında yüklenen belgelerde bilgi bulunmamaktadır."
 
 
+# --------------------------------------------------------------------------
+# ATIF ETİKETLERİ — DENENDİ, ÖLÇÜLDÜ, GERİ ALINDI
+# --------------------------------------------------------------------------
+# SORUN (gerçek): Kaynaklar [K1], [K2] diye numaralı. Gerçek bir kira
+# sözleşmesinde maddeler de sade rakamla numaralıydı ("7 Kiracı kontrat
+# müddetinin son ayı içinde ... karşı koymaz."). Model MADDE numarasını
+# kaynak numarası sanıp [K7] üretti; yalnızca 4 kaynak vardı, guardrail
+# "uydurma kaynak" deyip yanıtı reddetti. Cevap elindeyken YANLIŞ RET.
+# Guardrail doğru çalıştı; kusur etiket şemasındaydı.
+#
+# DENENEN ÇÖZÜM: Etiketleri harfe çevirmek ([KA], [KB]...). Madde numaraları
+# rakam, etiketler harf olunca çakışma matematiksel olarak imkânsız hale
+# geliyordu. Mantık sağlamdı.
+#
+# ÖLÇÜM SONUCU — ÇÖZÜM MALİYETİ KAZANCINDAN BÜYÜK ÇIKTI:
+#
+#     etiket        koşu sayısı   geliştirme seti
+#     [K1] rakam         3          28/29  (her seferinde)
+#     [KA] harf          3          25, 26, 26
+#
+# Harf şeması geliştirme setinde tutarlı olarak İKİ SORUYA mal oldu,
+# karşılığında bir gerçek belge sorusunu kurtardı. Üç düzeltme turu denendi;
+# her tur iki soruyu kurtarıp iki soruyu bozdu. 7B model bu ölçekte etiket
+# biçimine beklenmedik ölçüde duyarlı.
+#
+# KARAR: Rakama geri dönüldü. Ölçülen maliyeti olan, ölçülen net kazancı
+# olmayan bir değişiklik tutulmaz.
+#
+# MADDE NUMARASI ÇAKIŞMASI ARTIK BİLİNEN BİR SINIRDIR: sade rakamla
+# numaralanmış belgelerde (kira sözleşmesi, yönetmelik) model bazen madde
+# numarasını atıf sanar ve guardrail yanıtı reddeder. Sonuç yanlış ret olur —
+# yani sistem yanlış bilgi vermez, susar. Hata türü olarak kabul edilebilir
+# olanıdır.
+#
+# YAN BULGU (iki kez tekrarlandı): Talimat metnine SOMUT ÖRNEK JETON koymak
+# modelin o jetonu kopyalamasına yol açıyor.
+#   · Sistem promptu: 'madde numarasını atıf sanma, [K7] DEĞİLDİR'
+#         -> model iki soruda hiç metin üretmedi, yalnızca "[KA]" yazdı
+#   · Kullanıcı promptu: 'atıfı koyarak yanıtla (örn. [KA])'
+#         -> model iki soruda yanıta "[KA] " ile başladı
+# Çalışan hâlde talimat SOYUT: "[K numarası] atıfı koyarak". Kopyalanacak
+# jeton yok; biçimi bağlam bloklarının kendisi gösteriyor.
+# --------------------------------------------------------------------------
+
+
+def citation_label(index: int) -> str:
+    """1 tabanlı kaynak sırasını atıf etiketine çevirir."""
+    return str(max(1, int(index)))
+
+
+def citation_index(label: str) -> int:
+    """Etiketi 1 tabanlı sıraya çevirir. Geçersizse 0."""
+    s = (label or "").strip()
+    return int(s) if s.isdigit() else 0
+
+
 # NOT — PROMPT UZUNLUĞU BİR KAYNAK MESELESİDİR:
 # Bu metin her soruda bağlam penceresine girer. Kurallar zamanla birikip
 # ~4000 karaktere ulaştığında (~1450 token), 4096'lık pencerede kaynaklara
@@ -58,7 +114,7 @@ kısaca kendini tanıt ve hangi belgelerde arama yapabileceğini söyle. Bu duru
 """
 
 
-CONTEXT_BLOCK_TEMPLATE = """[K{n}] Belge: {source} | Konum: {locator}{section}
+CONTEXT_BLOCK_TEMPLATE = """[K{label}] Belge: {source} | Konum: {locator}{section}
 ---
 {text}
 ---"""
@@ -126,7 +182,7 @@ def build_context(chunks: List[dict], char_budget: int = 9000) -> str:
         text = ch.get("text", "")
 
         block = CONTEXT_BLOCK_TEMPLATE.format(
-            n=i,
+            label=citation_label(i),
             source=meta.get("source_file", "bilinmiyor"),
             locator=meta.get("locator", "-"),
             section=section_str,

@@ -181,10 +181,26 @@
     E.ingest.disabled = E.rebuild.disabled = true;
     say("", rebuild ? "İndeks sıfırdan kuruluyor…" : "Belgeler işleniyor… (taranmış PDF varsa uzun sürebilir)");
     try {
-      const r = await (await fetch("/api/ingest", {
+      // Sunucu hata döndürdüğünde gövde JSON OLMAYABİLİR ("Internal Server
+      // Error" düz metindir). Doğrudan .json() çağırmak, kullanıcıya asıl
+      // hata yerine "Unexpected token 'I'" gösteriyordu.
+      const resp = await fetch("/api/ingest", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rebuild: !!rebuild }),
-      })).json();
+      });
+      const govde = await resp.text();
+      let r;
+      try {
+        r = JSON.parse(govde);
+      } catch {
+        throw new Error(
+          resp.status === 500
+            ? `Sunucu hatası (${resp.status}). Ayrıntı sunucu konsolunda: ` +
+              govde.slice(0, 160)
+            : `Beklenmeyen yanıt (${resp.status}): ${govde.slice(0, 160)}`
+        );
+      }
+      if (!resp.ok) throw new Error(r.detail || `Sunucu hatası (${resp.status})`);
       const bits = [];
       if (r.added?.length) bits.push(`${r.added.length} yeni`);
       if (r.updated?.length) bits.push(`${r.updated.length} güncel`);

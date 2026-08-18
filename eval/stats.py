@@ -79,6 +79,42 @@ def bicimle(ozet: dict) -> str:
             + f"  (GA %{ozet['ga_alt']:.0f}-{ozet['ga_ust']:.0f})")
 
 
+def fark_araligi(b1: int, n1: int, b2: int, n2: int) -> dict:
+    """
+    İki oran ARASINDAKİ FARKIN güven aralığı (Newcombe skor yöntemi).
+
+    NEDEN AYRI BİR HESAP GEREKİYOR?
+    "Aralıklar örtüşüyor mu?" sorusu farkın YÖNÜ hakkında kabaca fikir verir
+    ama BÜYÜKLÜĞÜ hakkında hiçbir şey söylemez. Örneğin:
+
+        geliştirme 28/29 (%97)  ↔  taranmış 9/16 (%56)
+
+    Nokta tahmini 40 puan. Ama bu iki küçük örneklemle farkın kendisi de
+    belirsizdir: gerçek etki 15 puan da olabilir 64 puan da. "OCR maliyeti
+    40 puandır" demek, veriden daha kesin konuşmaktır. Doğru ifade şudur:
+    "etki gerçektir (aralık sıfırı içermiyor), büyüklüğü bu örneklemle
+    kesinleştirilemez".
+
+    -> {"fark", "alt", "ust", "anlamli"}  (yüzde puan cinsinden)
+       anlamli=True ise aralık sıfırı içermez, yani fark yön olarak gerçektir.
+    """
+    if n1 <= 0 or n2 <= 0:
+        return {"fark": 0.0, "alt": 0.0, "ust": 0.0, "anlamli": False}
+
+    p1, p2 = b1 / n1, b2 / n2
+    l1, u1 = wilson_interval(b1, n1)
+    l2, u2 = wilson_interval(b2, n2)
+    d = p1 - p2
+    alt = d - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
+    ust = d + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+    return {
+        "fark": round(100 * d, 1),
+        "alt": round(100 * alt, 1),
+        "ust": round(100 * ust, 1),
+        "anlamli": not (alt <= 0 <= ust),
+    }
+
+
 def ortusuyor_mu(a: dict, b: dict) -> bool:
     """
     İki oranın güven aralıkları örtüşüyor mu?

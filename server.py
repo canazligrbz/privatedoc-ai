@@ -1,6 +1,6 @@
 """
-ETİ MADEN KURUMSAL BİLGİ ASİSTANI — Web Sunucusu (FastAPI)
-==========================================================
+BELGE ASİSTANI — Web Sunucusu (FastAPI)
+=======================================
 
 Streamlit yerine hafif bir FastAPI sunucusu + saf HTML/CSS/JS arayüz.
 Neden? Streamlit her etkileşimde tüm sayfayı yeniden çalıştırır, tasarımı
@@ -31,6 +31,8 @@ ensure_directories(CFG)
 
 import json  # noqa: E402
 import mimetypes  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
 
 import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -166,10 +168,30 @@ async def api_upload(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 def api_ingest(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
     if not _ingest_lock.acquire(blocking=False):
         raise HTTPException(409, "İndeksleme zaten sürüyor.")
+    # KİLİT HER DURUMDA SERBEST BIRAKILMALI.
+    # Aksi hâlde bir çökme sonrası sistem kalıcı olarak "İndeksleme zaten
+    # sürüyor" (409) durumunda kalır ve yalnızca sunucuyu yeniden başlatmak
+    # kurtarır. Bu yüzden tek bir try/finally kullanılıyor.
     try:
-        from src.ingest import ingest
-        rep = ingest(cfg=CFG, rebuild=bool(payload.get("rebuild")), verbose=False)
-        get_engine().refresh()
+        try:
+            from src.ingest import ingest
+            rep = ingest(cfg=CFG, rebuild=bool(payload.get("rebuild")), verbose=False)
+            get_engine().refresh()
+        except Exception as exc:
+            # İNDEKSLEME ÇÖKERSE SEBEBİ KULLANICIYA ULAŞMALI.
+            # Ham 500 gövdesi ("Internal Server Error") arayüzde JSON olarak
+            # ayrıştırılmaya çalışılıyor ve kullanıcı asıl hata yerine
+            # "Unexpected token 'I'" görüyordu. Gerçek kullanımda tam olarak
+            # bu oldu; mesaj hiçbir şey öğretmiyordu. Tam iz sunucu
+            # konsolunda kalır, özeti kullanıcıya gider.
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(
+                500,
+                f"İndeksleme sırasında beklenmeyen hata: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
         out = {
             "added": rep["added"], "updated": rep["updated"],
             "unchanged": rep["unchanged"], "removed": rep["removed"],
@@ -332,7 +354,68 @@ def api_chat(payload: Dict[str, Any] = Body(...)) -> StreamingResponse:
 
 # ============================================================ giriş noktası
 
+# Sunucunun ÇALIŞMASI için değil, İŞ YAPMASI için gereken paketler.
+# fastapi/uvicorn sistem Python'unda da kurulu olabilir; bunlar olmadan
+# sunucu açılır ama ilk indeksleme isteğinde çöker.
+_ZORUNLU_PAKETLER = {
+    "chromadb": "vektör veri tabanı",
+    "sentence_transformers": "embedding modeli",
+    "torch": "embedding modeli (CPU)",
+    "pypdf": "PDF okuma",
+}
+
+
+def _on_kontrol() -> None:
+    """
+    Açılışta ortamı denetler ve eksikse ANLAŞILIR bir mesajla durur.
+
+    NEDEN GEREKLİ?
+    Gerçek kullanımda şu oldu: kullanıcı sanal ortamı etkinleştirmeden
+    `python server.py` çalıştırdı. Sistem Python'unda fastapi kurulu olduğu
+    için sunucu sorunsuz açıldı, arayüz geldi, belgeler listelendi — ve
+    hata ancak "İndeksi güncelle" düğmesine basılınca, üstelik anlaşılmaz
+    bir biçimde ortaya çıktı:
+        ModuleNotFoundError: No module named 'chromadb'
+    Arayüzde görünen ise "Unexpected token 'I'" idi.
+
+    Yanlış ortamda çalıştığını en geç indeksleme anında değil, AÇILIŞTA
+    söylemek gerekir.
+    """
+    import importlib.util
+
+    eksik = [(m, aciklama) for m, aciklama in _ZORUNLU_PAKETLER.items()
+             if importlib.util.find_spec(m) is None]
+    if not eksik:
+        return
+
+    proje = Path(__file__).resolve().parent
+    venv = proje / ".venv"
+    calisan = Path(sys.prefix).resolve()
+    venv_disi = venv.exists() and calisan != venv
+
+    print("\n" + "=" * 66)
+    print("  BAŞLATILAMADI — ortam eksik")
+    print("=" * 66)
+    for m, aciklama in eksik:
+        print(f"  ✖ {m:<24} ({aciklama})")
+    print(f"\n  Kullanılan Python: {calisan}")
+
+    if venv_disi:
+        etkinlestir = (venv / "Scripts" / "activate" if os.name == "nt"
+                       else venv / "bin" / "activate")
+        print(f"  Proje sanal ortamı: {venv}")
+        print("\n  SANAL ORTAM ETKİN DEĞİL. Paketler .venv içinde kurulu;")
+        print("  sistem Python'u ile çalıştırıldığı için görünmüyorlar.")
+        print(f"\n  Çözüm:\n      {etkinlestir}\n      python server.py")
+    else:
+        print("\n  Paketler kurulu değil. Çözüm:")
+        print("      pip install -r requirements.txt")
+    print("=" * 66 + "\n")
+    sys.exit(1)
+
+
 def main() -> None:
+    _on_kontrol()
     import uvicorn
     print("\n  Belge Asistanı")
     print("  → http://127.0.0.1:8501\n")

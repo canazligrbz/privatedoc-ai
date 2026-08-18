@@ -288,7 +288,7 @@ def main() -> int:
     args = ap.parse_args()
 
     print("\n" + "=" * 76)
-    print("  ETİ MADEN YEREL RAG — KURULUM DOĞRULAMA RAPORU")
+    print("  BELGE ASİSTANI — KURULUM DOĞRULAMA RAPORU")
     print("  " + time.strftime("%d.%m.%Y %H:%M:%S"))
     print("=" * 76)
 

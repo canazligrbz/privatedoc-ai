@@ -367,11 +367,7 @@ def strip_question_echo(answer: str, question: str) -> str:
     if not answer or not question:
         return answer or ""
 
-    def kok(t: str) -> str:
-        # Kaba ek ayıklama: "çalıştırılacaktır" ve "çalıştırılacak" eşleşsin
-        return t[:6] if len(t) >= 7 and not t[0].isdigit() else t
-
-    q_terim = {kok(t) for t in content_terms(strip_citations(question))}
+    q_terim = set(content_terms(strip_citations(question)))
     if len(q_terim) < 3:
         return answer
 
@@ -384,8 +380,22 @@ def strip_question_echo(answer: str, question: str) -> str:
     if len(f_terim) < 3:
         return answer
 
-    # Soruda geçmeyen bir terim varsa cümle bilgi taşıyor demektir.
-    if any(kok(t) not in q_terim for t in f_terim):
+    # TAM KELİME karşılaştırması — kök/ek ayıklaması YAPILMAZ.
+    #
+    # İlk sürüm ilk 6 harfi kök sayıyordu ("çalıştırılacaktır" ≈
+    # "çalıştırılacak"). Bu, Türkçede OLUMSUZLUK EKİNİ görünmez kılıyor:
+    #
+    #     soru  : "avans verilecek midir?"      -> "verilecek"        -> "verile"
+    #     cevap : "avans verilemeyecektir"      -> "verilemeyecektir" -> "verile"
+    #
+    # İki kelime zıt anlamlı ama aynı köke iniyor. Ayıklayıcı "yeni terim yok"
+    # deyip DOĞRU cevabı yankı sanıp sildi (gerçek ölçümde oldu).
+    #
+    # Tam kelime karşılaştırmasında "verilemeyecektir" soruda geçmez, cümle
+    # korunur. Bedeli: küçük bir çekim farkı olan gerçek yankılar artık
+    # yakalanmaz. Bu bilinçli bir tercih — yankıyı kaçırmak zayıf bir yanıt
+    # üretir, doğru cevabı silmek yanlış bir ret üretir; ikincisi pahalıdır.
+    if any(t not in q_terim for t in f_terim):
         return answer
 
     kalan = answer[answer.find(ilk) + len(ilk):].strip()

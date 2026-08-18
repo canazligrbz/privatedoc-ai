@@ -39,7 +39,8 @@ Dil modeli, embedding modeli ve vektör veri tabanı **aynı makinede** çalış
 9. [Air-gap kurulum (transfer paketi)](#9-air-gap-kurulum-transfer-paketi)
 10. [Güvenlik ve KVKK](#10-güvenlik-ve-kvkk)
 11. [Sorun giderme](#11-sorun-giderme)
-12. [Lisans](#12-lisans)
+12. [Bilinen sınırlar](#12-bilinen-sınırlar)
+13. [Lisans](#13-lisans)
 
 ---
 
@@ -134,10 +135,12 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 Sonuç ikiye ayrılıyor ve ikisi de dürüstçe söylenmeli:
 
-| Karşılaştırma | Aralıklar | Yorum |
-|---|---|---|
-| Geliştirme (%83–99) ↔ **Ayrılmış** (%78–98) | **örtüşüyor** | 3,5 puanlık "genelleme farkı" bu örneklemle **ölçüm gürültüsünden ayırt edilemez** |
-| Geliştirme (%83–99) ↔ **Taranmış** (%33–77) | **örtüşmüyor** | OCR'ın maliyeti **istatistiksel olarak gerçek** bir etki |
+| Karşılaştırma | Fark | Farkın GA'sı | Yorum |
+|---|---|---|---|
+| Geliştirme ↔ **Ayrılmış** | 3,4 puan | **−11,2 … +18,8** | Sıfırı içeriyor → **aşırı uyuma dair kanıt yok** |
+| Geliştirme ↔ **Taranmış** | 40,3 puan | **15,5 … 63,5** | Sıfırı içermiyor → **etki gerçek**, büyüklüğü belirsiz |
+
+Farkın güven aralığı, iki ayrı aralığa bakmaktan daha bilgilendiricidir (Newcombe skor yöntemi, `eval/stats.py → fark_araligi`). "Aralıklar örtüşüyor mu?" sorusu farkın **yönü** hakkında kabaca fikir verir ama **büyüklüğü** hakkında hiçbir şey söylemez.
 
 Yani ayrılmış set için söylenebilecek dürüst şey "sistem genelliyor" değil, **"aşırı uyuma dair kanıt bulunamadı"**dır. Aradaki fark önemlidir: ikincisi verinin desteklediği, birincisi desteklemediği iddiadır. Farkı gerçekten ölçmek için çok daha büyük bir set gerekir.
 
@@ -206,7 +209,7 @@ $ python eval/run_eval.py --testset eval/testset_holdout.yaml
   testset_holdout.yaml, geliştirme sırasında çalıştırılmamalıdır.
 ```
 
-Ölçüm yapıldı ve fark **3,5 puan** çıktı — sistem geneller durumda. Ayrılmış set bir kez açıldı, sonuçları yukarıda raporlandı ve **artık harcanmıştır**; genelleme yeniden ölçülecekse yeni bir set yazılmalıdır.
+Ölçüm yapıldı: fark **3,4 puan**, güven aralığı **−11,2 … +18,8 puan** — aralık sıfırı içerdiği için bu örneklemle **aşırı uyuma dair kanıt bulunamadı**. Bu, "sistem genelliyor" demek DEĞİLDİR; veri ne genellediğini ne genellemediğini gösterecek güçte. Ayrılmış set bir kez açıldı, sonuçları yukarıda raporlandı ve **artık harcanmıştır**; genelleme yeniden ölçülecekse yeni bir set yazılmalıdır.
 
 Sonuçları kendiniz üretmek için:
 
@@ -326,7 +329,9 @@ taranmış : 12/2024 | Vil sovid kapaiiis  | | 36. —«*1..455.200,00
 taranmış : sözleşme bedelinin yüzde ikisi (962) oranında      ← (%2) → (962)
 ```
 
-**Ölçülen: %96,6 → %56,2. OCR maliyeti 40 puan.**
+**Ölçülen: 28/29 (%97) → 9/16 (%56).**
+
+Fark **40,3 puan**, güven aralığı **15,5 … 63,5 puan** (Newcombe). Aralık sıfırı içermiyor, yani **etki gerçek**. Ancak büyüklüğü bu örneklemle kesinleştirilemez: gerçek maliyet 15 puan da olabilir 64 puan da. "OCR 40 puana mal oluyor" demek veriden daha kesin konuşmak olurdu.
 
 Bu sonuç iki tahmini birden çürüttü ve ikisi de bu README'de yazılıydı:
 
@@ -869,7 +874,40 @@ python eval/run_eval.py --testset eval/testset_depo.yaml
 
 ---
 
-## 12. Lisans
+## 12. Bilinen sınırlar
+
+Bu bölüm, sistemin ölçülmüş zayıflıklarını tek yerde toplar. Hepsi ölçümle tespit edildi; hiçbiri tahmin değildir.
+
+### Ölçümün sınırları
+
+- **Test seti tek belge ve tek alandan.** Üç setin üçü de aynı sentetik depo sözleşmesinden yazıldı. Ayrılmış set **soru genellemesini** ölçer, **belge genellemesini** ölçmez. "Bu sistem tek bir sözleşmeye göre mi ayarlandı?" sorusunun cevabı henüz yok.
+- **Örneklem küçük.** 29 soruda bir soru 3,4 puan. Tüm oranlar güven aralığıyla verilir; geliştirme ↔ ayrılmış farkının aralığı sıfırı içerir, yani **aşırı uyuma dair kanıt bulunamadı** — "genelliyor" kanıtlanmadı.
+- **Puanlama anahtar kelime tabanlı.** Beklenen ifadenin yanıtta geçip geçmediğine bakılır; anlamsal doğruluk ölçülmez. Sayısal beklentilerde rakam sınırı zorunlu kılınarak şişme kırıldı, ancak yöntem hâlâ kelime varlığı ölçer.
+- **Gecikme oynak.** Aynı makinede p50 için 22–47 sn arası gözlendi. Doğruluk metrikleri ise tekrarlanan koşularda sabit kalıyor (`temperature 0.0`, `seed 42`).
+
+### Sistemin sınırları
+
+- **Ay adı ↔ ay numarası.** Belge `11/2024`, kullanıcı "Kasım 2024" diyor. Arama katmanı denkliği biliyor ve doğru satırı ilk sıraya taşıyor; üretim katmanı satırı kullanmayı reddediyor. Üç prompt müdahalesi denendi, üçü ölçüldü, hiçbiri kazanç sağlamadı.
+- **Madde numarası ↔ atıf çakışması.** Sade rakamla numaralanmış belgelerde (kira sözleşmesi, yönetmelik) model bazen madde numarasını kaynak numarası sanıp `[K7]` üretir; guardrail bunu uydurma sayıp yanıtı reddeder. Harf etiketi denendi, geliştirme setinde iki soruya mal olduğu için geri alındı. Sonuç yanlış rettir — sistem yanlış bilgi vermez, susar.
+- **Tablo satır bölme üç sayfada çalışmıyor.** Tanımlar, personel ücretleri ve bakım programı tabloları tek blok kalıyor; komşu satıra kayma riski o sayfalarda daha yüksek.
+- **Madde tanıma yalnızca `MADDE 5.1` biçimini tanıyor.** Sade `4 ` biçimindeki numaralandırma tanınmaz; o belgelerde parçalama karakter sayısına göre yapılır ve maddeler ortadan bölünebilir.
+
+### OCR sınırları
+
+- **OCR maliyeti gerçek, büyüklüğü belirsiz.** Taranmış sürümde fark 40,3 puan, güven aralığı 15,5–63,5 puan. Etkinin varlığı istatistiksel olarak sağlam; miktarı bu örneklemle kesinleştirilemez.
+- **Sessiz veri kaybı olabilir.** OCR bir tablonun tüm satırlarını kaybedebilir ve geriye bozulmuş bir iz bırakmaz. Tespit ölçütü (mürekkep başına karakter) bunu yakalamak için eklendi, ancak **sezgiseldir, kanıt değildir.**
+- **Eşik üç sayfadan türetildi.** `min_chars_per_ink: 3.0` değeri tek bir belgenin üç taranmış sayfasıyla kalibre edildi (hasarsız 4,0 · hasarlı 2,5–2,7). Eşik **yazı tipine, punto boyutuna, DPI'ya ve belge türüne bağlıdır**; başka belge ailelerinde yeniden kalibrasyon gerekebilir. Belge-içi göreli karşılaştırma bunu kısmen telafi eder (sayfa, belgenin en iyi sayfasıyla kıyaslanır) ama tüm sayfaları benzer şekilde hasarlı bir belgede yalnızca mutlak eşik devrede kalır.
+- **Fotoğraf/kaşe içeren sayfalarda yanlış uyarı verebilir.** Mürekkep yüksek, metin az olduğu için içerik kaybı sanılabilir. Çıktı bir uyarıdır, hata değil; sayfa yine indekslenir.
+
+### Kapsam sınırları
+
+- **Air-gap koruması süreç düzeyinde.** `airgap.py` uygulama sürecini yamalar; Ollama ayrı süreçtir ve kapsam dışıdır. Makine düzeyinde yalıtım için ağ arayüzü kapatılmalıdır.
+- **Tek kullanıcı, kimlik doğrulama yok.** Çok kullanıcılı kurulum için önüne SSO/LDAP doğrulaması yapan bir ters vekil sunucu gerekir.
+- **Reranker ölçülmedi.** Varsayılan olarak kapalı; açık/kapalı karşılaştırması yapılmadığı için kazancı hakkında sayısal bir iddia yok.
+
+---
+
+## 13. Lisans
 
 Kaynak kod **MIT** lisanslıdır (bkz. `LICENSE`). Kullanılan modeller kendi lisanslarına tabidir:
 

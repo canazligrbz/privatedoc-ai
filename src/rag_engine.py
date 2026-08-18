@@ -39,6 +39,8 @@ from .prompts import (
     REFUSAL,
     SYSTEM_PROMPT,
     build_user_prompt,
+    citation_index,
+    citation_label,
 )
 
 CITATION_RE = re.compile(r"\[K\s*(\d{1,2})\]")
@@ -478,7 +480,7 @@ class RAGEngine:
         if not answer.strip():
             return refusal, True, "Model belgelerde bilgi bulamadı."
 
-        found = {int(m) for m in CITATION_RE.findall(answer)}
+        found = {citation_index(m) for m in CITATION_RE.findall(answer)}
         valid_ids = {s.n for s in sources}
 
         if bool(g.get("validate_citation_ids", True)):
@@ -486,8 +488,8 @@ class RAGEngine:
             if hallucinated:
                 # Var olmayan kaynak numarası üretildi -> güvenilmez
                 return (refusal, True,
-                        f"Model geçersiz kaynak numarası üretti: "
-                        f"{sorted('K%d' % h for h in hallucinated)}")
+                        f"Model geçersiz kaynak etiketi üretti: "
+                        f"{sorted('K' + citation_label(h) for h in hallucinated)}")
 
         if bool(g.get("require_citation", True)) and not found:
             return refusal, True, "Yanıtta hiçbir kaynak atfı bulunmuyor."
@@ -511,7 +513,7 @@ class RAGEngine:
         # Atıfsız cümleler çıkarıldıysa yanıt kısalmış olabilir; atıf
         # kümesi de değişebileceğinden yeniden hesaplanır.
         answer = cleaned
-        found = {int(m) for m in CITATION_RE.findall(answer)}
+        found = {citation_index(m) for m in CITATION_RE.findall(answer)}
 
         for s in sources:
             s.cited = s.n in found
@@ -690,7 +692,11 @@ class RAGEngine:
             elapsed_s=time.time() - t0,
             retrieved=retrieved,
             used=len(chunks),
-            raw_answer=raw if refused else "",
+            # HAM ÇIKTI HER ZAMAN SAKLANIR.
+            # Önce yalnızca ret durumunda tutuluyordu; guardrail'in
+            # cümle ayıkladığı (ama reddetmediği) durumlarda modelin ne
+            # yazdığı görünmüyordu ve hata ayıklama körlemesine yapılıyordu.
+            raw_answer=raw,
         )
         self._audit(res)
         yield {"type": "final", "result": res}

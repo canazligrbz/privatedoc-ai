@@ -122,6 +122,39 @@ DURUMLAR = [
     ("atıfsız yanıt reddedilmeli",
      "Günlük yemek bedeli 145,00 TL'dir.",
      YEMEK, "Yemek bedeli nedir?", False, None),
+
+    # MADDE NUMARALI BELGELER — doğru atıf verildiğinde çalışmalı.
+    # Gerçek bir kira sözleşmesinde model madde numarasını ([K7]) atıf sandı
+    # ve guardrail yanıtı reddetti. Harf etiketi denendi, ölçüldü, geliştirme
+    # setinde iki soruya mal olduğu için geri alındı (bkz. src/prompts.py).
+    # Bu testler, DOĞRU atıflı yanıtların madde numaralı belgelerde de
+    # sorunsuz geçtiğini garanti eder.
+    ("🔒 madde numaralı belgede atıf çakışması yok",
+     "Kiracı, gelen taliplerin gezip görmesine karşı koymaz [K1].",
+     ["7 Kiracı kontrat müddetinin son ayı içinde kiralanan şeyi görmek için "
+      "gelen taliplerin gezip görmesine ve vasıflarını tetkik etmesine karşı "
+      "koymaz. 8 Kira müddeti bittiği halde..."],
+     "Kiracı taliplere karşı koyabilir mi?", True, "koymaz"),
+
+    ("🔒 metindeki madde numarası atıf sanılmıyor",
+     "Kiralanan şeyin vergisi ve tamiri kiraya verene aittir [K2].",
+     ["4 Kiralanan şeyin vergisi ve tamiri kiraya verene, temizleme "
+      "masrafları kiracıya aittir."],
+     "Tamir kime aittir?", True, "kiraya verene"),
+
+    # OLUMSUZLUK EKİ, YANKI AYIKLAYICISINDA KAYBOLMAMALI.
+    # Kaba kök ayıklama (ilk 6 harf) "verilecek" ile "verilemeyecektir"i aynı
+    # köke indiriyordu; iki kelime ZIT anlamlı. Ayıklayıcı "yeni terim yok"
+    # deyip doğru cevabı yankı sanıp sildi (gerçek ölçümde oldu).
+    ("🔒 olumsuz cevap yankı sanılmıyor (verilecek ↔ verilemeyecek)",
+     "Bu iş için avans verilemeyecektir. [K2]",
+     ["5.5. Bu iş için avans verilmeyecektir."],
+     "Bu iş için avans verilecek midir?", True, "verilemeyecektir"),
+
+    ("🔒 olumsuz cevap yankı sanılmıyor (koyar ↔ koymaz)",
+     "Kiracı gelen taliplere karşı koymaz. [K1]",
+     ["7 Kiracı ... gelen taliplerin gezip görmesine karşı koymaz."],
+     "Kiracı gelen taliplere karşı koyar mı?", True, "koymaz"),
 ]
 
 
@@ -202,7 +235,7 @@ def _boilerplate_testleri() -> List[Tuple[str, bool]]:
 # =====================================================================
 
 def _istatistik_testleri() -> List[Tuple[str, bool]]:
-    from stats import oran_ozeti, ortusuyor_mu, wilson_interval
+    from stats import fark_araligi, oran_ozeti, ortusuyor_mu, wilson_interval
 
     lo28, hi28 = wilson_interval(28, 29)
     gel, ayr = oran_ozeti(28, 29), oran_ozeti(27, 29)
@@ -224,6 +257,16 @@ def _istatistik_testleri() -> List[Tuple[str, bool]]:
          ortusuyor_mu(gel, ayr)),
         ("geliştirme ↔ taranmış aralıkları ÖRTÜŞMÜYOR (OCR etkisi gerçek)",
          not ortusuyor_mu(gel, tar)),
+
+        # FARKIN KENDİSİNİN belirsizliği — "40 puan" demek veriden daha
+        # kesin konuşmaktır. Newcombe aralığı bunu görünür kılar.
+        ("genelleme farkının aralığı sıfırı İÇERİYOR (kanıt yok)",
+         not fark_araligi(28, 29, 27, 29)["anlamli"]),
+        ("🔒 OCR farkının aralığı sıfırı İÇERMİYOR (etki gerçek)",
+         fark_araligi(28, 29, 9, 16)["anlamli"]),
+        ("🔒 OCR farkının büyüklüğü GENİŞ bir aralıkta (tek sayı yanıltıcı)",
+         (fark_araligi(28, 29, 9, 16)["ust"]
+          - fark_araligi(28, 29, 9, 16)["alt"]) > 30),
     ]
 
 
