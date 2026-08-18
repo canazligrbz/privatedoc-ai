@@ -282,7 +282,13 @@ def main() -> int:
     # gelir. Bir kez bakılıp sonuçlarına göre ayar yapıldığında set "yanar"
     # ve artık genelleme ölçmez. Bu disiplini hafızaya bırakmak yerine
     # mekanik hale getiriyoruz: açık onay olmadan çalışmaz.
-    if "holdout" in path.name.lower() and not args.holdout:
+    # KİLİT İŞARETİ: dosya adına değil, dosyanın kendi başlığına bakılır.
+    # Dosya adına bakmak ("holdout" geçiyor mu) kırılgandı — yeni bir ayrılmış
+    # set farklı adla yazıldığında koruma sessizce devre dışı kalırdı.
+    ilk_satirlar = "\n".join(path.read_text(encoding="utf-8").splitlines()[:20])
+    kilitli = ("# KİLİTLİ" in ilk_satirlar) or ("holdout" in path.name.lower())
+
+    if kilitli and not args.holdout:
         print("=" * 62)
         print("  AYRILMIŞ TEST SETİ — KİLİTLİ")
         print("=" * 62)

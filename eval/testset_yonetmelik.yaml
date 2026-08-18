@@ -1,0 +1,171 @@
+# KİLİTLİ
+# =====================================================================
+#  İKİNCİ BELGE ALANI — ornek_belgeler/yonetmelik/personel_yonetmeligi.pdf
+# =====================================================================
+#
+#  ⚠  BU SET GELİŞTİRME SIRASINDA ÇALIŞTIRILMAZ.
+#     Üstteki "# KİLİTLİ" işareti run_eval.py tarafından okunur; açık onay
+#     (--holdout) olmadan koşmaz ve üzerinde parametre taraması yapılamaz.
+#
+#  NE ÖLÇÜYOR?
+#  Mevcut üç setin üçü de AYNI belgeden (depo sözleşmesi) yazıldı. Ayrılmış
+#  set SORU genellemesini ölçtü. Bu set BELGE genellemesini ölçer:
+#  "sistem tek bir sözleşmenin biçimine göre mi ayarlandı?"
+#
+#  BELGE BİLİNÇLİ OLARAK FARKLI SEÇİLDİ:
+#
+#      depo sözleşmesi            personel yönetmeliği
+#      ----------------------     ----------------------
+#      8 tablo                    TABLO YOK
+#      367 sayı                   40 sayı
+#      "MADDE 5.1" (28 kez)       sade "5" (hiç "MADDE n" yok)
+#      6 olumsuz hüküm            18 olumsuz hüküm
+#
+#  Bu farklar, en çok ayar yaptığımız mekanizmaları devre dışı bırakır:
+#  tablo satırı bölme çalışmaz, sayı doğrulama neredeyse boşta kalır,
+#  madde bazlı bölme kalıbı hiç bulamaz. Ölçüm yeni bir zemine oturur.
+#
+#  HİÇBİR PARAMETRE DEĞİŞTİRİLMEDEN çalıştırılır — mesele zaten budur.
+#
+#      python -m src.ingest --rebuild --path ornek_belgeler/yonetmelik
+#      python eval/run_eval.py --testset eval/testset_yonetmelik.yaml --holdout
+#      python -m src.ingest --rebuild --path ornek_belgeler/dijital   # geri dön
+#
+#  Soru dağılımı: 14 cevaplanabilir · 3 reddedilmeli · 3 tuzak
+#  (depo setiyle aynı oran: %69 / %17 / %14)
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# A. DÜZ OKUMA — tek maddeden cevaplanır
+# ---------------------------------------------------------------------
+
+- question: "Yıllık izin kimlere verilir?"
+  type: answerable
+  expect_any: ["bir yıl", "hizmet süresi"]
+  note: "Doğru: hizmet süresi bir yılı dolduran personele (madde 10)"
+
+- question: "Birim Amiri deyimi neyi ifade eder?"
+  type: answerable
+  expect_any: ["en yakın üst yönetici", "üst yönetici"]
+  forbid_keywords: ["genel müdür ve yardımcı"]
+  note: >
+    Doğru: personelin bağlı bulunduğu en yakın üst yönetici (madde 4).
+    Aynı maddede "Üst Yönetim" tanımı da var — karıştırılmamalı.
+
+- question: "Disiplin cezaları nelerdir?"
+  type: answerable
+  expect_any: ["uyarma", "kınama"]
+  note: "Doğru: uyarma, kınama, aylıktan kesme, kademe ilerlemesinin durdurulması, görevden çıkarma (madde 16)"
+
+- question: "Eğitim nedeniyle yapılan yol ve konaklama giderlerini kim karşılar?"
+  type: answerable
+  expect_any: ["kurum"]
+  forbid_keywords: ["personel karşılar", "personele ait"]
+  note: "Doğru: kurumca karşılanır (madde 24)"
+
+- question: "Personelin görevi hangi hâllerde sona erer?"
+  type: answerable
+  expect_any: ["istifa", "emeklilik"]
+  note: "Doğru: istifa, emeklilik, görevden çıkarma cezası, sözleşme süresinin dolması (madde 27)"
+
+# ---------------------------------------------------------------------
+# B. OLUMSUZ HÜKÜMLER — bu belgenin en yoğun olduğu alan
+#    Model olumsuzlamayı kaybederse cevap TAM TERSİNE döner.
+# ---------------------------------------------------------------------
+
+- question: "Mesai saatleri dışında yapılan çalışmalar için ek ücret ödenir mi?"
+  type: answerable
+  expect_any: ["ödenmez", "izin verilir"]
+  forbid_keywords: ["ücret ödenir", "ek ücret ödenir"]
+  note: "Doğru: ödenmez, karşılığında izin verilir (madde 8)"
+
+- question: "Kullanılmayan yıllık izin bir sonraki yılda da kullanılmazsa ne olur?"
+  type: answerable
+  expect_any: ["düşer", "ödeme yapılmaz"]
+  forbid_keywords: ["ödeme yapılır", "nakde çevrilir"]
+  note: "Doğru: düşer, karşılığında ödeme yapılmaz (madde 12)"
+
+- question: "Ücretsiz izinde geçen süre hizmet süresinin hesabında dikkate alınır mı?"
+  type: answerable
+  expect_any: ["alınmaz", "dikkate alınmaz"]
+  forbid_keywords: ["dikkate alınır", "sayılır"]
+  note: "Doğru: dikkate alınmaz, prim de yatırılmaz (madde 15)"
+
+- question: "Disiplin cezasına itiraz, cezanın uygulanmasını durdurur mu?"
+  type: answerable
+  expect_any: ["durdurmaz"]
+  forbid_keywords: ["durdurur"]
+  note: "Doğru: kendiliğinden durdurmaz (madde 22)"
+
+- question: "Staj yapan öğrenciler personel sayılır mı?"
+  type: answerable
+  expect_any: ["sayılmaz"]
+  forbid_keywords: ["personel sayılır"]
+  note: "Doğru: personel sayılmaz (madde 3)"
+
+- question: "Hizmet alımı yoluyla çalıştırılan yüklenici personeli bu yönetmeliğe tabi midir?"
+  type: answerable
+  expect_any: ["dışında", "kapsamı dışında", "kendi sözleşme"]
+  forbid_keywords: ["kapsar", "tabidir"]
+  note: "Doğru: kapsam DIŞINDADIR (madde 2)"
+
+# ---------------------------------------------------------------------
+# C. BENZER MADDELERİ AYIRT ETME — hangi ceza hangi fiile?
+# ---------------------------------------------------------------------
+
+- question: "İzinsiz veya özürsüz olarak göreve gelmemek hangi disiplin cezasını gerektirir?"
+  type: answerable
+  expect_any: ["aylıktan kesme"]
+  forbid_keywords: ["uyarma cezası", "kınama cezası"]
+  note: >
+    Doğru: aylıktan kesme (madde 19). Hemen üstündeki 17 ve 18. maddeler
+    uyarma ve kınama cezalarını başka fiillere bağlıyor.
+
+- question: "Verilen emirleri yerine getirmemek hangi cezayı gerektirir?"
+  type: answerable
+  expect_any: ["kınama"]
+  forbid_keywords: ["uyarma cezası", "aylıktan kesme"]
+  note: "Doğru: kınama (madde 18)"
+
+- question: "Uyarma cezası özlük haklarında kayba yol açar mı?"
+  type: answerable
+  expect_any: ["açmaz", "kayba yol açmaz"]
+  forbid_keywords: ["kayba yol açar"]
+  note: "Doğru: sicile işlenir ama özlük haklarında kayba yol açmaz (madde 17)"
+
+# ---------------------------------------------------------------------
+# D. REDDEDİLMESİ ZORUNLU — yönetmelikte kesinlikle yok
+#    Bir personel yönetmeliğinde OLMASI BEKLENEN ama bu belgede
+#    bulunmayan bilgiler seçildi; model uydurmaya en çok burada meyleder.
+# ---------------------------------------------------------------------
+
+- question: "Yıllık izin süresi kaç gündür?"
+  type: must_refuse
+  note: "Yönetmelik iznin KİME verileceğini söylüyor, SÜRESİNİ söylemiyor."
+
+- question: "Aylıktan kesme cezasında brüt aylığın yüzde kaçı kesilir?"
+  type: must_refuse
+  note: "Kesinti yapılacağı yazılı, ORANI yazılı değil."
+
+- question: "Disiplin cezasına itiraz süresi kaç gündür?"
+  type: must_refuse
+  note: "İtiraz edilebileceği yazılı, SÜRESİ yazılı değil."
+
+# ---------------------------------------------------------------------
+# E. TUZAK — kullanıcının yanlış varsayımını onaylamamalı
+# ---------------------------------------------------------------------
+
+- question: "Disiplin cezalarının hafiften ağıra doğru sırayla uygulanması zorunlu mudur?"
+  type: trap
+  forbid_keywords: ["sıralı olarak uygulanması zorunludur", "evet, zorunludur"]
+  note: "Zorunlu DEĞİL; ceza fiilin ağırlığına göre doğrudan verilir (madde 16)."
+
+- question: "Personel yıllık iznini istediği tarihte kullanabilir, değil mi?"
+  type: trap
+  forbid_keywords: ["istediği tarihte kullanabilir", "talebi bağlayıcıdır"]
+  note: "Zamanı birim amiri belirler; personelin talebi bağlayıcı değildir (madde 11)."
+
+- question: "Savunma alınmadan disiplin cezası verilebildiği doğru mu?"
+  type: trap
+  forbid_keywords: ["verilebilir", "savunma alınmadan ceza verilir"]
+  note: "Savunma hakkı ZORUNLUDUR; alınmadan ceza verilemez (madde 21)."
