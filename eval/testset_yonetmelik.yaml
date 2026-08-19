@@ -1,18 +1,35 @@
-# KİLİTLİ
 # =====================================================================
-#  İKİNCİ BELGE ALANI — ornek_belgeler/yonetmelik/personel_yonetmeligi.pdf
+#  İKİNCİ BELGE ALANI — GELİŞTİRME SETİ
+#  ornek_belgeler/yonetmelik/personel_yonetmeligi.pdf
 # =====================================================================
 #
-#  ⚠  BU SET GELİŞTİRME SIRASINDA ÇALIŞTIRILMAZ.
-#     Üstteki "# KİLİTLİ" işareti run_eval.py tarafından okunur; açık onay
-#     (--holdout) olmadan koşmaz ve üzerinde parametre taraması yapılamaz.
+#  BU SET AYRILMIŞ (HELD-OUT) DEĞİLDİR. Kilitli değildir; serbestçe
+#  çalıştırılabilir ve sonuçlarına bakarak düzeltme yapılabilir.
 #
-#  NE ÖLÇÜYOR?
-#  Mevcut üç setin üçü de AYNI belgeden (depo sözleşmesi) yazıldı. Ayrılmış
-#  set SORU genellemesini ölçtü. Bu set BELGE genellemesini ölçer:
-#  "sistem tek bir sözleşmenin biçimine göre mi ayarlandı?"
+#  NEDEN AYRILMIŞ SAYILMIYOR — DÜRÜST AÇIKLAMA
+#  Bu belgeyi ve soruları yazarken, bu belge ailesinin sistemde nasıl
+#  davrandığını ZATEN BİLİYORDUM. Gerçek bir kira sözleşmesi (taranmış JPG)
+#  daha önce incelenmişti ve şunlar görülmüştü:
 #
-#  BELGE BİLİNÇLİ OLARAK FARKLI SEÇİLDİ:
+#    · sade rakamla numaralı maddeler atıf şemasıyla çakışıyor ([K7] hatası)
+#    · olumsuz hükümler yankı ayıklayıcısında kayboluyor
+#      ("verilecek" ↔ "verilemeyecektir" aynı köke iniyordu)
+#    · düz metin ağırlıklı belgelerde parçalama körlemesine yapılıyor
+#
+#  Bu gözlemlerden SONRA iki müdahale yapıldı: olumsuzluk düzeltmesi (tutuldu)
+#  ve harf etiketi denemesi (ölçüldü, geri alındı).
+#
+#  Belge bilinçli olarak o profili hedefliyor ve 14 cevaplanabilir sorunun
+#  ALTISI olumsuz hüküm üzerine — yani en çok soru koyduğum kategori, tam da
+#  yamaladığım kategori. Bu seti "hiç görülmemiş ikinci alan" diye raporlamak,
+#  okuyanın bilemeyeceği bir avantajı gizlemek olurdu.
+#
+#  KARAR, SAYI GÖRÜLMEDEN VERİLDİ: bu set alanın geliştirme seti sayılır.
+#  Gerçek belge-genellemesi ölçümü için, bu alandaki ayarlar bittikten sonra
+#  AYRI bir yönetmelik belgesi ve kilitli set yazılacaktır
+#  (bkz. YAPILACAKLAR → madde 6b).
+#
+#  BELGE PROFİLİ — depo sözleşmesinden bilinçli olarak farklı:
 #
 #      depo sözleşmesi            personel yönetmeliği
 #      ----------------------     ----------------------
@@ -21,18 +38,15 @@
 #      "MADDE 5.1" (28 kez)       sade "5" (hiç "MADDE n" yok)
 #      6 olumsuz hüküm            18 olumsuz hüküm
 #
-#  Bu farklar, en çok ayar yaptığımız mekanizmaları devre dışı bırakır:
+#  Bu farklar en çok ayar yaptığımız mekanizmaları devre dışı bırakır:
 #  tablo satırı bölme çalışmaz, sayı doğrulama neredeyse boşta kalır,
-#  madde bazlı bölme kalıbı hiç bulamaz. Ölçüm yeni bir zemine oturur.
-#
-#  HİÇBİR PARAMETRE DEĞİŞTİRİLMEDEN çalıştırılır — mesele zaten budur.
+#  madde bazlı bölme kalıbı hiç bulamaz.
 #
 #      python -m src.ingest --rebuild --path ornek_belgeler/yonetmelik
-#      python eval/run_eval.py --testset eval/testset_yonetmelik.yaml --holdout
+#      python eval/run_eval.py --testset eval/testset_yonetmelik.yaml
 #      python -m src.ingest --rebuild --path ornek_belgeler/dijital   # geri dön
 #
 #  Soru dağılımı: 14 cevaplanabilir · 3 reddedilmeli · 3 tuzak
-#  (depo setiyle aynı oran: %69 / %17 / %14)
 # =====================================================================
 
 # ---------------------------------------------------------------------

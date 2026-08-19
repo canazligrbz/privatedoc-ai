@@ -121,15 +121,16 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 **Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only (GPU yok), depodaki `config.yaml` varsayılanları
 
-| Metrik | Geliştirme seti | **Ayrılmış set** | Taranmış¹ | Hedef |
-|---|---|---|---|---|
-| Sorular görüldü mü? | evet, ayar buna göre | **hayır** | evet | — |
-| **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | **27/29 · %93**<br><sub>GA %78–98</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
-| **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
-| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 6/11 · %55<br><sub>GA %28–79</sub> | ≤ %10 |
-| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 5/5 · %100 | %100 |
-| Gecikme (medyan)² | 25–41 sn | 22–36 sn | 23 sn | ≤ 60 sn |
-| Gecikme (p95)² | 30–48 sn | 28–45 sn | 36 sn | — |
+| Metrik | Geliştirme seti | **Ayrılmış set** | Yönetmelik² | Taranmış¹ | Hedef |
+|---|---|---|---|---|---|
+| Belge | depo sözleşmesi | depo sözleşmesi | **yönetmelik** | depo (taranmış) | — |
+| Sorular görüldü mü? | evet, ayar buna göre | **hayır** | hayır ama alan kısmen görülmüş | evet | — |
+| **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | **27/29 · %93**<br><sub>GA %78–98</sub> | **17/20 · %85**<br><sub>GA %64–95</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
+| **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | **3/3 · %100**<br><sub>GA %44–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
+| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 2/14 · %14<br><sub>GA %4–40</sub> | 6/11 · %55<br><sub>GA %28–79</sub> | ≤ %10 |
+| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 14/14 · %100 | 5/5 · %100 | %100 |
+| Gecikme (medyan)³ | 25–41 sn | 22–36 sn | 36 sn | 23 sn | ≤ 60 sn |
+| Gecikme (p95)³ | 30–48 sn | 28–45 sn | 50 sn | 36 sn | — |
 
 ### Bu sayılar ne kadar kesin? — örneklem uyarısı
 
@@ -140,6 +141,7 @@ Sonuç ikiye ayrılıyor ve ikisi de dürüstçe söylenmeli:
 | Karşılaştırma | Fark | Farkın GA'sı | Yorum |
 |---|---|---|---|
 | Geliştirme ↔ **Ayrılmış** | 3,4 puan | **−11,2 … +18,8** | Sıfırı içeriyor → **aşırı uyuma dair kanıt yok** |
+| Geliştirme ↔ **Yönetmelik** | 11,6 puan | **−5,3 … +32,8** | Sıfırı içeriyor → **alan farkı gösterilemiyor** |
 | Geliştirme ↔ **Taranmış** | 40,3 puan | **15,5 … 63,5** | Sıfırı içermiyor → **etki gerçek**, büyüklüğü belirsiz |
 
 Farkın güven aralığı, iki ayrı aralığa bakmaktan daha bilgilendiricidir (Newcombe skor yöntemi, `eval/stats.py → fark_araligi`). "Aralıklar örtüşüyor mu?" sorusu farkın **yönü** hakkında kabaca fikir verir ama **büyüklüğü** hakkında hiçbir şey söylemez.
@@ -150,9 +152,24 @@ Buna karşılık OCR etkisi net: aralıklar örtüşmüyor, yani 40 puanlık dü
 
 Wilson aralığı bilinçli seçildi; klasik (Wald) yaklaşımı küçük örneklemde ve oran 1'e yakınken bozulur — 28/29 için üst sınırı %100'ün üstüne çıkarır, 29/29 için ise "hiç belirsizlik yok" der.
 
+### İkinci belge alanı ne gösterdi?
+
+Skor farkı istatistiksel olarak gösterilemedi, ama **mekanizma bulgusu istatistik gerektirmiyor**: yönetmeliğin üç hatasının üçünde de doğru cevap getirilen parçanın **içindeydi**. Yirmi sorunun yirmisinde getirme çalıştı; başarısızlıkların tamamı üretim tarafında.
+
+En öğretici olanı 2. soru:
+
+```
+kaynak : "...bağlı bulunduğu en yakın üst yöneticiyi..."
+model  : "...bağlı bulunduğu en yakın üst yındıktıyı ifade eder [K1][K2]."
+```
+
+Model kelimeyi bozdu ve **hiçbir guardrail yakalamadı.** Yanıt düzgün kurulmuş, atıflı, uydurma sayı içermiyor. Sebebi yapısal: doğrulama katmanımızın en güçlü ayağı olan **sayı denetimi, sayısız bir belgede tamamen boştadır**. Depo sözleşmesinde 367 sayı vardı ve her biri kaynakla karşılaştırılıyordu; yönetmelikte 40 sayı var ve hiçbiri bu cümlede geçmiyor.
+
+Bu, ikinci alanın ortaya çıkardığı asıl kazançtır: doğrulama mimarimiz **sayı merkezli** ve düz metin ağırlıklı belgelerde koruma yüzeyi belirgin şekilde daralıyor. Tek belgeyle çalışırken görülemezdi.
+
 ### Ret doğruluğu
 
-**Her iki sette de %100.** Ayrılmış setteki 5 "reddedilmesi zorunlu" sorunun tamamı ve 4 tuzak sorunun tamamı doğru davranışla sonuçlandı. Sistemin var oluş amacı olan davranış — bilmediğinde uydurmamak — görülmemiş sorulara tam olarak aktarılıyor.
+**Üç sette de %100.** Ayrılmış setteki 5 "reddedilmesi zorunlu" sorunun tamamı ve 4 tuzak sorunun tamamı doğru davranışla sonuçlandı. Sistemin var oluş amacı olan davranış — bilmediğinde uydurmamak — görülmemiş sorulara tam olarak aktarılıyor.
 
 Ayrılmış setteki iki hatanın **ikisi de aynı sınıftan** ve geliştirme setindeki tek hatayla aynı: doğru kaynak getirilmiş, model onu kullanmayı reddetmiş.
 
@@ -167,9 +184,11 @@ Sistemin kalan zayıflığı **tek bir yerde toplanmış durumda: getirme değil
 
 > **Ayrılmış set artık harcanmıştır.** Tek seferlik açıldı ve sonuçları raporlandı. Buradan sonra yapılacak iyileştirmeler geliştirme seti üzerinde yürütülmeli, genelleme yeniden ölçülecekse **yeni** bir ayrılmış set yazılmalıdır. Bu setin sonuçlarına bakarak parametre ayarlamak, onu ikinci bir geliştirme setine dönüştürür.
 
+² **Yönetmelik seti AYRILMIŞ DEĞİLDİR.** Sorular görülmemiştir ama belge ailesi görülmüştür: gerçek bir kira sözleşmesi daha önce incelenmiş, üç kusur tespit edilmiş ve ikisine müdahale edilmişti (olumsuzluk düzeltmesi tutuldu, harf etiketi geri alındı). Belge o profili bilinçli hedefler ve 14 cevaplanabilir sorunun altısı olumsuz hüküm üzerinedir — yani en çok soru konan kategori, yamalanan kategoriyle aynıdır. Bu yüzden alanın **geliştirme seti** sayılır; gerçek belge-genellemesi ölçümü için ayrı ve kilitli bir set yazılacaktır.
+
 ¹ Taranmış sürüm, aynı sözleşmenin 7., 8. ve 13. sayfalarının taranmış görüntüsüdür. Ayrıntılı çözümleme aşağıda.
 
-² Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
+³ Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
 
 ### Ölçüm aletinin doğrulanması
 
@@ -904,6 +923,7 @@ Bu bölüm, sistemin ölçülmüş zayıflıklarını tek yerde toplar. Hepsi ö
 
 - **Ay adı ↔ ay numarası.** Belge `11/2024`, kullanıcı "Kasım 2024" diyor. Arama katmanı denkliği biliyor ve doğru satırı ilk sıraya taşıyor; üretim katmanı satırı kullanmayı reddediyor. Üç prompt müdahalesi denendi, üçü ölçüldü, hiçbiri kazanç sağlamadı.
 - **Madde numarası ↔ atıf çakışması.** Sade rakamla numaralanmış belgelerde (kira sözleşmesi, yönetmelik) model bazen madde numarasını kaynak numarası sanıp `[K7]` üretir; guardrail bunu uydurma sayıp yanıtı reddeder. Harf etiketi denendi, geliştirme setinde iki soruya mal olduğu için geri alındı. Sonuç yanlış rettir — sistem yanlış bilgi vermez, susar.
+- **Doğrulama katmanı sayı merkezli.** Guardrail'in en güçlü ayağı, yanıttaki her sayının kaynakta birebir geçmesini şart koşar. Sayı içermeyen belgelerde (yönetmelik, prosedür, hukuk metni) bu katman boşta kalır ve bozuk bir KELİME denetimden geçer — ölçümde tam olarak bu oldu (`yöneticiyi` → `yındıktıyı`, hiçbir katman yakalamadı).
 - **Tablo satır bölme üç sayfada çalışmıyor.** Tanımlar, personel ücretleri ve bakım programı tabloları tek blok kalıyor; komşu satıra kayma riski o sayfalarda daha yüksek.
 - **Madde tanıma yalnızca `MADDE 5.1` biçimini tanıyor.** Sade `4 ` biçimindeki numaralandırma tanınmaz; o belgelerde parçalama karakter sayısına göre yapılır ve maddeler ortadan bölünebilir.
 
