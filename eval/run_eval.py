@@ -98,6 +98,10 @@ def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
             f"{' '.join((s.text or '').split())[:95]}"
             for s in res.sources
         ],
+        # METİN DOĞRULAMA KATMANININ İŞARETLERİ ("warn" kipinde).
+        # Yanıtı etkilemez, yalnızca ölçülür: bu katman "block" kipine
+        # alınırsa kaç DOĞRU cevap yanlışlıkla reddedilirdi?
+        "unsupported": list(res.unsupported_terms or []),
         "passed": True,
         "issues": [],
     }
@@ -161,6 +165,21 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     answerable = [r for r in rows if r["type"] not in ("must_refuse", "trap")]
     lat = sorted(r["elapsed_s"] for r in rows) or [0]
 
+    # METİN DOĞRULAMA — GÖLGE ÖLÇÜM
+    # Katman "warn" kipinde çalışır ve hiçbir yanıtı etkilemez. Buradaki iki
+    # sayı, "block" kipine geçilirse ne olacağını önceden söyler:
+    #
+    #   yanlis_alarm : cevap DOĞRUYDU ama katman kelime işaretledi
+    #                  -> block kipinde bu cevap kaybedilirdi
+    #   yakalanan    : cevap YANLIŞTI ve katman kelime işaretledi
+    #                  -> block kipinde bu hata ret'e dönerdi (kazanç)
+    #
+    # Payda, katmanın gerçekten çalıştığı satırlardır: reddedilen sorularda
+    # ortada denetlenecek bir yanıt yoktur.
+    uretilen = [r for r in rows if not r["refused"]]
+    dogru = [r for r in uretilen if r["passed"]]
+    yanlis = [r for r in uretilen if not r["passed"]]
+
     # ORANLAR SAYIMLA VE GÜVEN ARALIĞIYLA BİRLİKTE VERİLİR.
     # 29 soruluk bir sette bir soru 3,4 puandır; "%96,6" gibi tek başına bir
     # yüzde, var olmayan bir hassasiyet iddia eder. Wilson aralığı, sayının
@@ -176,6 +195,10 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                                      len(answerable)),
         "gecikme_p50_s": round(statistics.median(lat), 2),
         "gecikme_p95_s": round(lat[max(0, int(len(lat) * 0.95) - 1)], 2),
+        "metin_yanlis_alarm": oran_ozeti(
+            len([r for r in dogru if r.get("unsupported")]), len(dogru)),
+        "metin_yakalanan": oran_ozeti(
+            len([r for r in yanlis if r.get("unsupported")]), len(yanlis)),
     }
 
 
@@ -187,6 +210,12 @@ def print_summary(summary: Dict[str, Any]) -> None:
         print(f"  {anahtar:<18}: {bicimle(summary[anahtar])}")
     print(f"  {'gecikme_p50_s':<18}: {summary['gecikme_p50_s']}")
     print(f"  {'gecikme_p95_s':<18}: {summary['gecikme_p95_s']}")
+    print("-" * 66)
+    print("  METİN DOĞRULAMA — gölge ölçüm (hiçbir yanıtı etkilemedi)")
+    print(f"  {'yanlış alarm':<18}: {bicimle(summary['metin_yanlis_alarm'])}"
+          "   ← doğru cevapta işaret (block kipinde KAYIP)")
+    print(f"  {'yakalanan':<18}: {bicimle(summary['metin_yakalanan'])}"
+          "   ← yanlış cevapta işaret (block kipinde KAZANÇ)")
     print("=" * 66)
     print("  GA = %95 Wilson güven aralığı. Küçük örneklemde yüzdeler oynaktır;")
     print("  aralıkları örtüşen iki sonuç arasındaki fark, bu veriyle")
@@ -222,6 +251,12 @@ def run_once(engine: RAGEngine, cases: List[Dict], verbose: bool = True) -> Dict
             print(f" {mark} [{i:>2}/{len(cases)}] {case['question'][:64]}")
             for issue in r["issues"]:
                 print(f"       ↳ {issue}")
+            # İşaretlenen kelimeler DOĞRU cevaplarda da yazdırılır: yanlış
+            # alarmların hangi kelimelerden geldiğini görmeden beyaz liste
+            # körlemesine büyütülür.
+            if r.get("unsupported"):
+                print(f"       ~ metin doğrulama işareti: "
+                      f"{', '.join(r['unsupported'][:8])}")
             # Başarısız durumlarda YANITI ve KAYNAKLARI göster.
             # Bunlar olmadan "eksik anahtar kelime" uyarısı tek başına
             # sorunun getirmede mi üretimde mi olduğunu söylemez.
@@ -301,6 +336,23 @@ def main() -> int:
         print(f"      python eval/run_eval.py --testset {args.testset} --holdout")
         return 1
 
+    # ------------------------------------------------- İNDEKS UYUŞMA KONTROLÜ
+    # Bir test setini YANLIŞ İNDEKS üzerinde koşmak, hatayla değil MAKUL
+    # GÖRÜNEN BİR SAYIYLA sonuçlanır — ölçümün en tehlikeli hâli.
+    #
+    # Gerçekte yaşandı: taranmış set, dijital indeks üzerinde koşturuldu.
+    # O setin "reddedilmeli" soruları, bilginin OCR'da KAYBOLMASINA dayanır;
+    # temiz belge indekste olunca model doğru cevabı buldu ve ölçüm bunları
+    # "halüsinasyon" saydı. Ret doğruluğu %100'den %40'a düştü, genel başarı
+    # ise 9/16'dan 10/16'ya ÇIKTI. İki sayı da anlamsızdı ama ikisi de
+    # inandırıcı görünüyordu.
+    #
+    # Bu yüzden test seti, hangi belgeyle koşulacağını kendi başlığında
+    # bildirir ve koşu öncesi indeksle karşılaştırılır.
+    beklenen = [s.split(":", 1)[1].strip()
+                for s in ilk_satirlar.splitlines()
+                if s.strip().startswith("# İNDEKS:")]
+
     if args.holdout and args.sweep:
         print("Ayrılmış set üzerinde parametre taraması yapılamaz: "
               "tarama, sete bakarak ayar yapmak demektir.")
@@ -310,6 +362,22 @@ def main() -> int:
     if engine.collection.count() == 0:
         print("İndeks boş. Önce 'python -m src.ingest' çalıştırın.")
         return 1
+
+    if beklenen:
+        from src import vectorstore  # noqa: E402
+        indekste = sorted({(r.get("metadata") or {}).get("source_file", "?")
+                           for r in vectorstore.fetch_all(engine.collection)})
+        if indekste != sorted(beklenen):
+            print("=" * 62)
+            print("  ÖLÇÜM BAŞLATILMADI — İNDEKS TEST SETİYLE UYUŞMUYOR")
+            print("=" * 62)
+            print(f"  Test seti bekliyor : {', '.join(sorted(beklenen))}")
+            print(f"  İndekste bulunan   : {', '.join(indekste) or '(boş)'}")
+            print("\n  Yanlış indeksle koşmak hata vermez, YANLIŞ AMA MAKUL")
+            print("  GÖRÜNEN bir skor üretir. Bu yüzden koşu durduruldu.")
+            print("\n  Doğru indeksi kurmak için test setinin başlığındaki")
+            print("  ingest komutunu çalıştırın.")
+            return 1
 
     # ---------------------------------------------------------------- ÖN KONTROL
     # 29 soruyu çalıştırıp sonunda "LLM kapalıymış" demek yerine, en baştan

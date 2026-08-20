@@ -86,6 +86,10 @@ class RAGResult:
     # SİLİNMEZ. Teşhis için kritik: parça hiç gelmedi mi, yoksa geldi de
     # model mi kullanamadı?
     sources_are_candidates: bool = False
+    # Metin doğrulama katmanının işaretlediği kelimeler. "warn" kipinde
+    # yanıt reddedilmez; bu liste yalnızca ölçüm ve teşhis için taşınır.
+    # Yanlış alarm oranı bu alan üzerinden hesaplanacak.
+    unsupported_terms: List[str] = field(default_factory=list)
 
 
 # ============================================================ yardımcılar
@@ -451,12 +455,13 @@ class RAGEngine:
 
     def _validate_and_finalize(self, raw_answer: str,
                                sources: List[Source],
-                               question: str = "") -> Tuple[str, bool, str]:
+                               question: str = "") -> Tuple[str, bool, str, List[str]]:
         """
-        GUARDRAIL 2-6 — atıf var mı, atıflar geçerli mi, her cümle
-        kaynağa dayanıyor mu, sayılar kaynakta geçiyor mu?
+        GUARDRAIL 2-7 — atıf var mı, atıflar geçerli mi, her cümle
+        kaynağa dayanıyor mu, sayılar kaynakta geçiyor mu, kelimelerin
+        kaynakta karşılığı var mı?
 
-        -> (nihai_yanıt, reddedildi_mi, gerekçe_veya_not)
+        -> (nihai_yanıt, reddedildi_mi, gerekçe_veya_not, işaretli_kelimeler)
            Reddedilmediyse üçüncü değer bilgilendirme notudur.
         """
         g = self.cfg.get_path("guardrail", {}) or {}
@@ -464,7 +469,7 @@ class RAGEngine:
         answer = (raw_answer or "").strip()
 
         if not answer:
-            return refusal, True, "Model boş yanıt üretti."
+            return refusal, True, "Model boş yanıt üretti.", []
 
         # RET CÜMLESİNİ AYIKLA — "içeriyorsa ret say" DEĞİL.
         #
@@ -478,7 +483,7 @@ class RAGEngine:
 
         answer, dropped_refusals = _verify.strip_refusal_sentences(answer, refusal)
         if not answer.strip():
-            return refusal, True, "Model belgelerde bilgi bulamadı."
+            return refusal, True, "Model belgelerde bilgi bulamadı.", []
 
         found = {citation_index(m) for m in CITATION_RE.findall(answer)}
         valid_ids = {s.n for s in sources}
@@ -489,10 +494,11 @@ class RAGEngine:
                 # Var olmayan kaynak numarası üretildi -> güvenilmez
                 return (refusal, True,
                         f"Model geçersiz kaynak etiketi üretti: "
-                        f"{sorted('K' + citation_label(h) for h in hallucinated)}")
+                        f"{sorted('K' + citation_label(h) for h in hallucinated)}",
+                        [])
 
         if bool(g.get("require_citation", True)) and not found:
-            return refusal, True, "Yanıtta hiçbir kaynak atfı bulunmuyor."
+            return refusal, True, "Yanıtta hiçbir kaynak atfı bulunmuyor.", []
 
         # GUARDRAIL 5 & 6 — cümle bazında atıf + sayı doğrulama.
         # "Yanıtta atıf var mı?" yetmez: model atıflı doğru cümleyi yazıp
@@ -505,10 +511,12 @@ class RAGEngine:
             require_sentence_citation=bool(g.get("require_citation_per_sentence", True)),
             sentence_action=str(g.get("sentence_citation_action", "strip")),
             verify_numbers=bool(g.get("verify_numbers", True)),
+            verify_text=str(g.get("verify_text", "warn")),
             min_sentence_len=int(g.get("min_factual_sentence_len", 40)),
         )
+        flagged = list(details.get("unsupported") or [])
         if not ok:
-            return refusal, True, reason
+            return refusal, True, reason, flagged
 
         # Atıfsız cümleler çıkarıldıysa yanıt kısalmış olabilir; atıf
         # kümesi de değişebileceğinden yeniden hesaplanır.
@@ -518,12 +526,18 @@ class RAGEngine:
         for s in sources:
             s.cited = s.n in found
 
-        note = ""
+        notes: List[str] = []
         if details.get("removed"):
-            note = (f"{len(details['removed'])} atıfsız cümle yanıttan çıkarıldı "
-                    f"(kaynağa dayandırılmamıştı).")
+            notes.append(f"{len(details['removed'])} atıfsız cümle yanıttan "
+                         f"çıkarıldı (kaynağa dayandırılmamıştı).")
+        # "warn" kipinde yanıt reddedilmez ama işaret kullanıcıdan gizlenmez:
+        # sessiz bir uyarı, hiç uyarı olmamasıyla aynı şeydir.
+        if flagged:
+            notes.append(f"Kaynaklarda karşılığı bulunamayan kelime(ler): "
+                         f"{', '.join(flagged[:5])}"
+                         + (" ..." if len(flagged) > 5 else ""))
 
-        return answer, False, note
+        return answer, False, " ".join(notes), flagged
 
     # -------------------------------------------------- bağlam bütçesi
 
@@ -668,7 +682,7 @@ class RAGEngine:
             return
 
         raw = "".join(buffer)
-        final_answer, refused, reason = self._validate_and_finalize(
+        final_answer, refused, reason, flagged = self._validate_and_finalize(
             raw, sources, question=question)
 
         res = RAGResult(
@@ -689,6 +703,7 @@ class RAGEngine:
             # cümle ayıkladığı (ama reddetmediği) durumlarda modelin ne
             # yazdığı görünmüyordu ve hata ayıklama körlemesine yapılıyordu.
             raw_answer=raw,
+            unsupported_terms=flagged,
         )
         self._audit(res)
         yield {"type": "final", "result": res}

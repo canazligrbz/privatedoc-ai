@@ -204,5 +204,21 @@ guardrail:
   # Uydurulan veya modelin kendi kafasından hesapladığı sayıları yakalar.
   # OCR'lı belgelerde nadiren yanlış ret'e yol açabilir; o durumda kapatın.
   verify_numbers: true
+  # METİN DOĞRULAMA — sayı denetiminin metin tarafındaki eşi.
+  #
+  # NEDEN: verify_numbers yalnızca SAYI GÖRÜRSE çalışır. Sayısız bir belgede
+  # tüm katman boşta kalır. Yönetmelik ölçümünde model "yöneticiyi" yerine
+  # "yındıktıyı" yazdı; yanıt atıflıydı, uydurma sayı yoktu, altı katmanın
+  # hiçbiri yakalamadı. Bu ayar, yanıttaki içerik kelimelerinin kaynakta
+  # karşılığı olup olmadığına bakar (Türkçe çekim eklerine toleranslı).
+  #
+  #   off   = hiç çalışma
+  #   warn  = kelimeleri kaydet ama yanıtı REDDETME  (ölçüm kipi)
+  #   block = reddet
+  #
+  # VARSAYILAN "warn": bu katmanın yanlış alarm oranı henüz ölçülmedi.
+  # Ölçmeden "block" yapmak, bu projede üç kez yaşanan "guardrail doğru
+  # cevabı sildi" hatasının dördüncüsünü davet eder. Önce ölç, sonra karar ver.
+  verify_text: "warn"
   # Modelin kendi genel bilgisini kullanmasını engelleyen ek talimatlar açık.
   strict_mode: true

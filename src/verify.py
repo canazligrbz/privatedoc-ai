@@ -402,12 +402,191 @@ def strip_question_echo(answer: str, question: str) -> str:
     return kalan
 
 
+# ==========================================================================
+# METİN TARAFI DOĞRULAMA
+# ==========================================================================
+#
+# NEDEN GEREKLİ?
+# Yukarıdaki sayı denetimi, yanıttaki her sayının kaynakta geçmesini şart
+# koşar. Güçlü bir denetimdir ama YALNIZCA SAYI GÖRÜRSE çalışır. Sayısız bir
+# belgede tüm katman boşta kalır. Yönetmelik ölçümünde tam olarak bu oldu:
+#
+#     kaynak : "...bağlı bulunduğu en yakın üst yöneticiyi ifade eder."
+#     model  : "...bağlı bulunduğu en yakın üst yındıktıyı ifade eder. [K1][K2]"
+#
+# Yanıt atıflıydı, uydurma sayı içermiyordu, cümle yapısı düzgündü — altı
+# katmanın hiçbiri yakalamadı. Oysa "yındıktıyı" kaynakta hiç geçmiyor.
+#
+# ÖLÇÜT YÖNÜ — strip_question_echo'nun TERSİ:
+# Burada gevşek eşleşme GÜVENLİ taraftır. Gevşeklik bir uydurmayı kaçırmakla
+# sonuçlanır (yanıt olduğu gibi kalır); katılık ise DOĞRU bir cevabı yanlışlıkla
+# işaretlemekle sonuçlanır. Bu yüzden Türkçe çekim eklerine karşı bilinçli
+# olarak cömert davranılır. Aynı gerekçeyle "verilecek ≈ verilemeyecektir"
+# çakışması burada zarar vermez: olsa olsa bir kaçırma üretir.
+
+_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+# EŞLEŞME ÖLÇÜTÜ: ortak önek (LCP) uzunluğu.
+#
+# Sabit uzunlukta önek (bm25'teki 6 harf) BURADA ÇALIŞMAZ. Türkçe fiil
+# kökleri üç harfe kadar inebilir ve çatı/olumsuzluk ekleri kökün hemen
+# ardına gelir:
+#
+#     kaynak "kesme"    ↔  model "kesilmesi"    ortak önek: "kes"   (3)
+#     kaynak "verilir"  ↔  model "verilmez"     ortak önek: "veril" (5)
+#     kaynak "dolduran" ↔  model "doldurmayan"  ortak önek: "doldur"(6)
+#
+# 6 harflik sabit önek ilk ikisini kaçırır ve DOĞRU cevabı işaretler. Bu
+# yüzden ölçüt orantısal: ortak önek, kısa olan kelimenin en az %60'ını
+# kaplamalı ve en az 3 harf olmalı.
+#
+#     "yönetici" ↔ "yındıktıyı"  ortak önek: "y" (1)  → işaretlenir ✔
+#
+# Oranın paydası KISA olan kelimedir; aksi hâlde kaynaktaki "ceza",
+# modeldeki "cezalandırma" ile eşleşemezdi.
+_MIN_LCP = 3
+_LCP_RATIO = 0.6
+
+# Bu uzunluğun altındaki kelimeler denetlenmez. Kısa kelimelerde meşru
+# yeniden ifade etme olasılığı yüksek, bozulmayı ayırt etme gücü düşüktür.
+_MIN_CHECK_LEN = 6
+
+# Modelin KAYNAKTAN BAĞIMSIZ olarak üretmesi meşru olan kelimeler: bağlaçlar,
+# yüklem kalıpları, kaynağa gönderme yapan ifadeler.
+#
+# BU LİSTE EKSİKTİR ve eksik olduğu bilinerek yazılmıştır. Tam bir Türkçe
+# sözlük olmadan hangi kelimenin "modelin kendi üslubu" olduğunu kestirmek
+# mümkün değil. Bu yüzden katman ÖNCE gölge modda ölçülür; listenin yeterli
+# olup olmadığına yanlış alarm oranına bakılarak karar verilir.
+_DISCOURSE_WORDS = {
+    # kaynağa gönderme
+    "kaynak", "kaynakta", "kaynaklarda", "kaynaklardan",
+    "kaynağında", "kaynağından", "belgede", "belgelerde", "belgelerden",
+    "yüklenen", "belirtilen", "belirtilmiş", "belirtilmiştir",
+    "belirtilmektedir", "belirtilmemiştir", "geçmektedir", "yazmaktadır",
+    # varlık/yokluk kalıpları
+    "bulunmamaktadır", "bulunmaktadır", "bulunmuyor", "bulunmakta",
+    "mevcuttur", "mevcut", "değildir", "değil", "yoktur",
+    # bağlaç ve geçişler
+    "dolayısıyla", "nedenle", "sebeple", "sonuç", "sonucunda", "özetle",
+    "kısacası", "böylece", "ayrıca", "buna", "bunun", "şekilde", "şöyledir",
+    "durumda", "durumunda", "halinde", "hâlinde", "ancak", "dolayı",
+    # soru/yanıt üstdili
+    "soru", "sorunun", "soruda", "sorulan", "cevap", "cevabı", "cevaben",
+    "yanıt", "yanıtı", "bilgi", "bilgiler", "bilgisi", "bilgiye",
+    # çok yaygın yüklemler
+    "ifade", "eder", "edilir", "edilmektedir", "olarak", "olan", "olduğu",
+    "göre", "ilgili", "hakkında", "yönelik", "üzere", "gerekir",
+    "gerekmektedir", "yapılır", "yapılmaktadır", "verilir", "verilmektedir",
+
+    # --------------------------------------------------------------------
+    # GELİŞTİRME SETİ ÖLÇÜMÜNDEN EKLENENLER
+    #
+    # İlk gölge ölçümde depo setinde 2 yanlış alarm çıktı; işaretlenen dört
+    # kelimenin dördü de içerik değil DİLBİLGİSİ kelimesiydi:
+    #     Q15 "arasında", "olmalıdır"      Q16 "aralığında", "tarafından"
+    #
+    # Bunlar geliştirme setinden görülerek eklendi — yani aşağıdaki liste
+    # ölçüme göre ayarlanmıştır ve bundan sonraki yanlış alarm oranı
+    # İYİMSERDİR. Katman "block" kipine alınmadan önce bu listeyi hiç
+    # görmemiş bir sette doğrulanması gerekir (bkz. YAPILACAKLAR → C).
+    #
+    # SINIR: buraya yalnızca EDAT, ÇEKİM ve YÜKLEM kalıpları girer. İçerik
+    # taşıyan isimler (unvan, tutar birimi, ekipman adı) BİLEREK dışarıda
+    # bırakılmıştır; onları beyaz listeye almak katmanın varlık sebebini
+    # ortadan kaldırır.
+    "arasında", "arasındaki", "aralığında", "aralığındadır", "tarafından",
+    "içinde", "içerisinde", "üzerinden", "boyunca", "süresince",
+    "kapsamındaki", "itibaren", "doğrultusunda", "karşılığında",
+    "olmalıdır", "olmaktadır", "olabilir", "olmuştur", "olacaktır",
+    "edilmiştir", "edilmelidir", "yapılmalıdır", "sağlanmalıdır",
+    "belirlenmiştir", "belirlenir", "uygulanır", "uygulanmaktadır",
+    "sayılır", "sayılmaz", "geçerlidir", "zorunludur",
+}
+
+
+def _tokens(text: str) -> List[str]:
+    """Sayısız, Türkçe-doğru küçültülmüş sözcükler."""
+    from .bm25 import tr_lower
+    return _WORD_RE.findall(tr_lower(text or ""))
+
+
+def _support_index(texts: Sequence[str]) -> Dict[str, List[str]]:
+    """
+    Kaynak kelimelerini ilk 3 harflerine göre kovalara ayırır.
+
+    Ortak önek en az 3 harf olmak zorunda olduğu için, bir kelimeyle
+    eşleşebilecek tüm adaylar zorunlu olarak aynı kovadadır. Böylece her
+    kelime için tüm kaynak sözlüğünü taramak gerekmez.
+    """
+    buckets: Dict[str, List[str]] = {}
+    seen: Set[str] = set()
+    for t in texts:
+        for w in _tokens(t):
+            if len(w) < _MIN_LCP or w in seen:
+                continue
+            seen.add(w)
+            buckets.setdefault(w[:_MIN_LCP], []).append(w)
+    return buckets
+
+
+def _lcp(a: str, b: str) -> int:
+    n = min(len(a), len(b))
+    i = 0
+    while i < n and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def _is_supported(word: str, buckets: Dict[str, List[str]]) -> bool:
+    """Kaynakta bu kelimenin çekimli bir akrabası var mı?"""
+    for cand in buckets.get(word[:_MIN_LCP], ()):
+        ortak = _lcp(word, cand)
+        if ortak >= _MIN_LCP and ortak / min(len(word), len(cand)) >= _LCP_RATIO:
+            return True
+    return False
+
+
+def unsupported_terms(answer: str,
+                      chunk_texts: Sequence[str],
+                      question: str = "",
+                      min_len: int = _MIN_CHECK_LEN) -> List[str]:
+    """
+    Yanıtta geçip kaynakların HİÇBİRİNDE karşılığı olmayan içerik kelimeleri.
+
+    Sorunun kelimeleri destekleyici sayılır: model soruyu tekrarlamakta
+    serbesttir ve soru metni kullanıcıdan gelir, uydurma değildir.
+
+    -> yanıttaki görülme sırasına göre, yinelenmeden
+    """
+    from .bm25 import STOPWORDS
+    body = strip_citations(answer or "")
+    if not body.strip():
+        return []
+
+    buckets = _support_index(list(chunk_texts) + [question or ""])
+
+    out: List[str] = []
+    seen: Set[str] = set()
+    for w in _tokens(body):
+        if len(w) < min_len or w in seen:
+            continue
+        if w in STOPWORDS or w in _DISCOURSE_WORDS:
+            continue
+        if _is_supported(w, buckets):
+            continue
+        seen.add(w)
+        out.append(w)
+    return out
+
+
 def check(answer: str,
           chunk_texts: Sequence[str],
           question: str = "",
           require_sentence_citation: bool = True,
           sentence_action: str = "strip",
           verify_numbers: bool = True,
+          verify_text: str = "off",
           min_sentence_len: int = 40) -> Tuple[bool, str, Dict[str, List[str]], str]:
     """
     Yanıtı denetler ve gerekirse temizler.
@@ -424,7 +603,8 @@ def check(answer: str,
          çıkarılmış bir cümledeki sayı gereksiz yere ret sebebi olmaz.
       3) Geriye atıflı hiçbir bilgi kalmadıysa yanıt reddedilir.
     """
-    details: Dict[str, List[str]] = {"uncited": [], "bad_numbers": [], "removed": []}
+    details: Dict[str, List[str]] = {"uncited": [], "bad_numbers": [],
+                                     "removed": [], "unsupported": []}
     if not answer or not answer.strip():
         return False, "Model boş yanıt üretti.", details, ""
 
@@ -517,6 +697,26 @@ def check(answer: str,
             return (False,
                     f"Kaynaklarda geçmeyen sayı üretildi: {', '.join(uniq[:6])}"
                     + (" ..." if len(uniq) > 6 else ""),
+                    details, cleaned)
+
+    # ---------- 3) Metin doğrulama (sayı denetiminin metin tarafındaki eşi)
+    #
+    # ÜÇ KİPTE ÇALIŞIR:
+    #   "off"   — hiç çalışmaz (varsayılan)
+    #   "warn"  — kelimeleri details'e yazar, yanıtı REDDETMEZ  ← ölçüm kipi
+    #   "block" — reddeder
+    #
+    # Varsayılanın "off" olması bilinçlidir. Bu katmanın yanlış alarm oranı
+    # HENÜZ ÖLÇÜLMEDİ. Ölçmeden blokçu yapmak, bu projede üç kez yaşanan
+    # "guardrail doğru cevabı sildi" hatasının dördüncüsünü davet ederdi.
+    if verify_text in ("warn", "block"):
+        details["unsupported"] = unsupported_terms(cleaned, chunk_texts, question)
+        if verify_text == "block" and details["unsupported"]:
+            uniq = details["unsupported"][:6]
+            return (False,
+                    f"Kaynaklarda karşılığı olmayan kelime üretildi: "
+                    f"{', '.join(uniq)}"
+                    + (" ..." if len(details["unsupported"]) > 6 else ""),
                     details, cleaned)
 
     return True, "", details, cleaned

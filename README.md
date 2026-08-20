@@ -127,10 +127,10 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 | Sorular görüldü mü? | evet, ayar buna göre | **hayır** | hayır ama alan kısmen görülmüş | evet | — |
 | **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | **27/29 · %93**<br><sub>GA %78–98</sub> | **17/20 · %85**<br><sub>GA %64–95</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
 | **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | **3/3 · %100**<br><sub>GA %44–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
-| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 2/14 · %14<br><sub>GA %4–40</sub> | 6/11 · %55<br><sub>GA %28–79</sub> | ≤ %10 |
-| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 14/14 · %100 | 5/5 · %100 | %100 |
-| Gecikme (medyan)³ | 25–41 sn | 22–36 sn | 36 sn | 23 sn | ≤ 60 sn |
-| Gecikme (p95)³ | 30–48 sn | 28–45 sn | 50 sn | 36 sn | — |
+| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 2/14 · %14<br><sub>GA %4–40</sub> | 5/11 · %45<br><sub>GA %21–72</sub> | ≤ %10 |
+| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 14/14 · %100 | 11/11 · %100 | %100 |
+| Gecikme (medyan)³ | 25–41 sn | 22–36 sn | 34 sn | 22 sn | ≤ 60 sn |
+| Gecikme (p95)³ | 30–48 sn | 28–45 sn | 47 sn | 32 sn | — |
 
 ### Bu sayılar ne kadar kesin? — örneklem uyarısı
 
@@ -624,7 +624,7 @@ Python paketleri `requirements.txt` içindedir, ancak **Tesseract motoru ayrıca
 
 ## 6. Halüsinasyon önleme mimarisi
 
-Tek bir prompt talimatı yeterli **değildir**. Sistemde birbirinden bağımsız **altı katman** vardır:
+Tek bir prompt talimatı yeterli **değildir**. Sistemde birbirinden bağımsız **yedi katman** vardır:
 
 | # | Katman | Nerede | Ne yapar |
 |---|---|---|---|
@@ -634,6 +634,7 @@ Tek bir prompt talimatı yeterli **değildir**. Sistemde birbirinden bağımsız
 | 4 | **Atıf denetimi** | `rag_engine._validate_and_finalize()` | Yanıtta hiç `[K#]` yoksa **reddedilir**. Verilmemiş bir kaynak numarası varsa (`[K7]` ama 5 kaynak var) **tamamen reddedilir** — bu, modelin uydurmaya başladığının en güçlü sinyalidir. |
 | 5 | **Cümle bazında atıf** | `verify.check()` | Sayı içeren veya uzun HER cümlede `[K#]` olmalı. Atıfsız cümle yanıttan **ayıklanır** (tüm yanıt reddedilmez). |
 | 6 | **Sayı doğrulama** | `verify.check()` | Yanıttaki her sayı, verilen kaynak metinlerde birebir geçmeli. Uydurulan veya modelin kendi hesapladığı sayıyı yakalar. |
+| 7 | **Metin doğrulama**<br><sub>*uyarı kipinde*</sub> | `verify.unsupported_terms()` | Yanıttaki içerik kelimelerinin kaynakta karşılığı var mı? Türkçe çekim eklerine toleranslı. **Şu an reddetmiyor, yalnızca uyarıyor** — gerekçesi aşağıda. |
 
 > **5 ve 6 gerçek bir hatadan doğdu.** Model şunu üretti:
 > *"İşin süresi ... otuziki aydır [K2]. ... Bu nedenle toplam iş süresi **30 aydır**."*
@@ -642,6 +643,27 @@ Tek bir prompt talimatı yeterli **değildir**. Sistemde birbirinden bağımsız
 > **Katman 5'in ilk hâli fazla sertti.** Atıfsız tek cümle yüzünden yanıtın tamamı reddediliyordu ve yanlış ret oranı %75'e çıkmıştı. `sentence_citation_action: "strip"` ile davranış "reddet"ten "ayıkla"ya çevrildi; doğruluk %75 → %89,7'ye yükseldi.
 
 Ek olarak: `temperature 0.0` + `seed 42` (tekrar üretilebilirlik), belge başına parça sınırı (tek belgenin bağlamı domine etmesini engeller), `strong_similarity` altında kullanıcıya düşük güven uyarısı.
+
+#### Katman 7 neden hâlâ reddetmiyor?
+
+Katman 6, adı üstünde, **sayı** merkezlidir; sayısız bir belgede tamamen boşta kalır. Yönetmelik ölçümünde model `yöneticiyi` yerine **`yındıktıyı`** yazdı — yanıt atıflıydı, uydurma sayı içermiyordu, cümle yapısı düzgündü ve **altı katmanın hiçbiri yakalamadı.** Katman 7 bu boşluğu kapatmak için yazıldı.
+
+Katman ölçülmeden blokçu yapılmadı. Önce `config.yaml → guardrail.verify_text: "warn"` ile **gölge kipte** koşuldu: kelimeleri kaydeder, hiçbir yanıtı reddetmez. Ölçüm öncesinde karar kuralı yazıldı — yanlış alarm ≤ %5 ise blokçu yap, %5–20 ise uyarıda bırak, > %20 ise geri al.
+
+| Set | Yanlış alarm<br><sub>doğru cevapta işaret</sub> | Yakalanan<br><sub>yanlış cevapta işaret</sub> |
+|---|---|---|
+| Geliştirme (depo) | 2/19 · %10,5 | veri yok¹ |
+| Yönetmelik | 0/14 · %0 | **1/1** — `yındıktıyı` |
+| Taranmış | 0/4 · %0 | 1/2 · %50 |
+| **Toplam** | **2/37 · %5,4** | **2/3** |
+
+<sub>¹ Depodaki tek hata bir RET'ti; ret'te denetlenecek yanıt yoktur.</sub>
+
+**%5,4, ilan edilen %5–20 bandına düşüyor → katman uyarı kipinde kaldı.** Ölçüm ayrıca `warn` kipinin gerçekten atıl olduğunu doğruladı: üç setin üçünde de skorlar birebir aynı kaldı.
+
+İki yanlış alarmın dördü de **dilbilgisi** kelimesiydi (`arasında`, `olmalıdır`, `aralığında`, `tarafından`), içerik değil. Beyaz listeye eklendiler — ama bu, **geliştirme setine bakarak** yapılmış bir ayardır, dolayısıyla bundan sonraki yanlış alarm oranı iyimserdir ve tek başına `block` kararına dayanak olamaz. Blokçu yapılmadan önce bu listeyi hiç görmemiş bir sette doğrulanması gerekir.
+
+> **Beyaz liste kalıcı çözüm değil.** Herhangi bir Türkçe kelime listede olmayabilir. Yapısal alternatif, kelimeyi *getirilen parçalarla* değil *tüm korpus sözlüğüyle* karşılaştırmaktır: `tarafından` belgelerde onlarca kez geçer, listeye hiç gerek kalmazdı; `yındıktıyı` ise hiçbir belgede geçmez, yine yakalanırdı. Bunun bedeli garantinin anlamının değişmesidir — "her kelime atıf verilen kaynakta var"dan "kelime kullanıcının belgelerinde var"a düşer.
 
 ### 6.1 Kullanılan system prompt
 
@@ -923,7 +945,8 @@ Bu bölüm, sistemin ölçülmüş zayıflıklarını tek yerde toplar. Hepsi ö
 
 - **Ay adı ↔ ay numarası.** Belge `11/2024`, kullanıcı "Kasım 2024" diyor. Arama katmanı denkliği biliyor ve doğru satırı ilk sıraya taşıyor; üretim katmanı satırı kullanmayı reddediyor. Üç prompt müdahalesi denendi, üçü ölçüldü, hiçbiri kazanç sağlamadı.
 - **Madde numarası ↔ atıf çakışması.** Sade rakamla numaralanmış belgelerde (kira sözleşmesi, yönetmelik) model bazen madde numarasını kaynak numarası sanıp `[K7]` üretir; guardrail bunu uydurma sayıp yanıtı reddeder. Harf etiketi denendi, geliştirme setinde iki soruya mal olduğu için geri alındı. Sonuç yanlış rettir — sistem yanlış bilgi vermez, susar.
-- **Doğrulama katmanı sayı merkezli.** Guardrail'in en güçlü ayağı, yanıttaki her sayının kaynakta birebir geçmesini şart koşar. Sayı içermeyen belgelerde (yönetmelik, prosedür, hukuk metni) bu katman boşta kalır ve bozuk bir KELİME denetimden geçer — ölçümde tam olarak bu oldu (`yöneticiyi` → `yındıktıyı`, hiçbir katman yakalamadı).
+- **Metin doğrulama henüz reddetmiyor.** Katman 6 sayı merkezlidir ve sayısız belgelerde (yönetmelik, prosedür, hukuk metni) boşta kalır; bozuk bir KELİME denetimden geçer (`yöneticiyi` → `yındıktıyı`). Katman 7 bunu kapatmak için yazıldı ve hedef vakayı ölçümde yakaladı, ancak yanlış alarm oranı (%5,4) blokçu yapma eşiğinin üzerinde kaldığı için **yalnızca uyarı üretiyor** — yani bu tür bir bozulma hâlâ kullanıcıya ulaşır, sadece yanında bir uyarı ile.
+- **Doğrulama, kaynağa sadakati ölçer; doğruluğu değil.** Tüm katmanlar yanıtı KAYNAK METİNLE karşılaştırır. Kaynağın kendisi bozuksa hiçbir katman devreye giremez. Ölçümde görüldü: OCR, `(%2)` ifadesini `(962)` olarak okumuştu; model bunu sadakatle aktardı, sayı denetimi "kaynakta geçiyor" dedi ve metin denetimi de bir kelime hatası görmedi. **Çöp girdi, doğrulanmış çöp çıktı.** Taranmış belgelerde bu, OCR kalite uyarılarının neden ciddiye alınması gerektiğinin somut sebebidir.
 - **Tablo satır bölme üç sayfada çalışmıyor.** Tanımlar, personel ücretleri ve bakım programı tabloları tek blok kalıyor; komşu satıra kayma riski o sayfalarda daha yüksek.
 - **Madde tanıma yalnızca `MADDE 5.1` biçimini tanıyor.** Sade `4 ` biçimindeki numaralandırma tanınmaz; o belgelerde parçalama karakter sayısına göre yapılır ve maddeler ortadan bölünebilir.
 
