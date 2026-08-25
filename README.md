@@ -121,16 +121,16 @@ Sistem "iyi görünüyor" diye değil, **ölçülerek** geliştirildi. Gerçek b
 
 **Yapılandırma:** `qwen2.5:7b-instruct-q4_K_M`, `temperature 0.0`, `seed 42`, CPU-only (GPU yok), depodaki `config.yaml` varsayılanları
 
-| Metrik | Geliştirme seti | **Ayrılmış set** | Yönetmelik² | Taranmış¹ | Hedef |
-|---|---|---|---|---|---|
-| Belge | depo sözleşmesi | depo sözleşmesi | **yönetmelik** | depo (taranmış) | — |
-| Sorular görüldü mü? | evet, ayar buna göre | **hayır** | hayır ama alan kısmen görülmüş | evet | — |
-| **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | **27/29 · %93**<br><sub>GA %78–98</sub> | **17/20 · %85**<br><sub>GA %64–95</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
-| **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | **3/3 · %100**<br><sub>GA %44–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
-| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | 2/14 · %14<br><sub>GA %4–40</sub> | 5/11 · %45<br><sub>GA %21–72</sub> | ≤ %10 |
-| **Kaynaklı yanıt** | 20/20 · %100 | **20/20 · %100** | 14/14 · %100 | 11/11 · %100 | %100 |
-| Gecikme (medyan)³ | 25–41 sn | 22–36 sn | 34 sn | 22 sn | ≤ 60 sn |
-| Gecikme (p95)³ | 30–48 sn | 28–45 sn | 47 sn | 32 sn | — |
+| Metrik | Geliştirme seti | Ayrılmış-1 | **Ayrılmış-2**³ | Yönetmelik² | Taranmış¹ | Hedef |
+|---|---|---|---|---|---|---|
+| Belge | depo sözleşmesi | depo sözleşmesi | depo sözleşmesi | **yönetmelik** | depo (taranmış) | — |
+| Sorular görüldü mü? | evet, ayar buna göre | hayır (harcandı) | **hayır** | hayır ama alan kısmen görülmüş | evet | — |
+| **Genel başarı** | 28/29 · %97<br><sub>GA %83–99</sub> | 27/29 · %93<br><sub>GA %78–98</sub> | **26/29 · %90**<br><sub>GA %74–96</sub> | **17/20 · %85**<br><sub>GA %64–95</sub> | 9/16 · %56<br><sub>GA %33–77</sub> | ≥ %85 |
+| **Ret doğruluğu** | 9/9 · %100<br><sub>GA %70–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | **5/5 · %100**<br><sub>GA %57–100</sub> | **3/3 · %100**<br><sub>GA %44–100</sub> | 5/5 · %100<br><sub>GA %57–100</sub> | ≥ %95 |
+| **Yanlış ret** | 1/20 · %5<br><sub>GA %1–24</sub> | 2/20 · %10<br><sub>GA %3–30</sub> | **2/20 · %10**<br><sub>GA %3–30</sub> | 2/14 · %14<br><sub>GA %4–40</sub> | 5/11 · %45<br><sub>GA %21–72</sub> | ≤ %10 |
+| **Kaynaklı yanıt** | 20/20 · %100 | 20/20 · %100 | **20/20 · %100** | 14/14 · %100 | 11/11 · %100 | %100 |
+| Gecikme (medyan)⁴ | 25–41 sn | 22–36 sn | 23 sn | 34 sn | 22 sn | ≤ 60 sn |
+| Gecikme (p95)⁴ | 30–48 sn | 28–45 sn | 28 sn | 47 sn | 32 sn | — |
 
 ### Bu sayılar ne kadar kesin? — örneklem uyarısı
 
@@ -140,13 +140,31 @@ Sonuç ikiye ayrılıyor ve ikisi de dürüstçe söylenmeli:
 
 | Karşılaştırma | Fark | Farkın GA'sı | Yorum |
 |---|---|---|---|
-| Geliştirme ↔ **Ayrılmış** | 3,4 puan | **−11,2 … +18,8** | Sıfırı içeriyor → **aşırı uyuma dair kanıt yok** |
+| Geliştirme ↔ **Ayrılmış-1** | 3,4 puan | **−11,2 … +18,8** | Sıfırı içeriyor → **aşırı uyuma dair kanıt yok** |
+| Geliştirme ↔ **Ayrılmış-2** | 6,9 puan | **−8,4 … +23,2** | Sıfırı içeriyor → aynı sonuç, bağımsız ikinci sette |
+| Ayrılmış-1 ↔ **Ayrılmış-2** | 3,4 puan | **−13,1 … +20,2** | Aradaki değişikliklere rağmen fark gösterilemiyor |
 | Geliştirme ↔ **Yönetmelik** | 11,6 puan | **−5,3 … +32,8** | Sıfırı içeriyor → **alan farkı gösterilemiyor** |
 | Geliştirme ↔ **Taranmış** | 40,3 puan | **15,5 … 63,5** | Sıfırı içermiyor → **etki gerçek**, büyüklüğü belirsiz |
 
 Farkın güven aralığı, iki ayrı aralığa bakmaktan daha bilgilendiricidir (Newcombe skor yöntemi, `eval/stats.py → fark_araligi`). "Aralıklar örtüşüyor mu?" sorusu farkın **yönü** hakkında kabaca fikir verir ama **büyüklüğü** hakkında hiçbir şey söylemez.
 
 Yani ayrılmış set için söylenebilecek dürüst şey "sistem genelliyor" değil, **"aşırı uyuma dair kanıt bulunamadı"**dır. Aradaki fark önemlidir: ikincisi verinin desteklediği, birincisi desteklemediği iddiadır. Farkı gerçekten ölçmek için çok daha büyük bir set gerekir.
+
+#### Ölçüm aletinin ikinci kusuru — bu kez ters yönde
+
+İkinci ayrılmış setin dördüncü sorusunda sistem doğru cevabı üretti:
+
+> *"Süre uzatımı sözlü mutabakatla **yapılabilir değil**. Sözlü mutabakat geçerli değildir, ek protokol ile yürürlüğe girer."*
+
+Sorunun yasaklı ifadesi `yapılabilir` idi. Bu dizgi `yapılabilir değil` ifadesinin **içinde** geçtiği için ölçüm aracı "tuzağa düşüldü" dedi ve doğru cevabı yanlış işaretledi.
+
+Bu, §daha önce düzeltilen şişme hatasının tam tersi. Orada gevşek eşleşme yanlış cevabı doğru sayıyordu (beklenen `6`, yanıtta `%16`); sayısal **beklentilere** rakam sınırı kondu ama **yasaklı ifadeler** alt dizi araması olarak bırakıldı. Aynı zayıflık öbür yönden vurdu: bu kez ölçüm sistemi olduğundan kötü gösterdi.
+
+Düzeltme, eşleşmenin hemen ardından ayrı bir olumsuzlama sözcüğü (`değil`, `değildir`) gelip gelmediğine bakıyor; geliyorsa ifade iddia edilmemiş, reddedilmiş demektir. Bu düzeltme yalnızca yanlış alarmı kaldırır, gerçek bir ihlali gizlemez — tuzağa düşen yanıt *"evet, yapılabilir"* der, *"yapılabilir değil"* demez.
+
+Düzeltmenin geçmiş ölçümlere etkisi ayrıca sınandı: iki geliştirme seti düzeltilmiş aletle yeniden koşuldu ve **skorlar değişmedi** (28/29 ve 17/20). Kusur gerçekti ama o setlerde hiç tetiklenmemişti — model Türkçede olumsuzluğu genelde ek olarak kuruyor (`yapılamaz`), ayrı sözcükle kurduğu tek örnek bu soruydu. Dolayısıyla daha önce raporlanan sayıların hepsi geçerliliğini koruyor.
+
+**Tablodaki sayı yine de 26/29 olarak bırakıldı.** Ayrılmış setin değeri, sonucu görüldükten sonra hiçbir şeyin sonuca göre değiştirilmemesinden gelir; aleti düzeltip 27/29 yazmak, düzeltme haklı olsa bile bu ilkeyi zedelerdi. Düzeltilmiş sayı dipnotta ayrıca verilmiştir. Türkçede olumsuzluğun bu projede **üçüncü** kez hata kaynağı olduğunu da not etmek gerekir: önce arama katmanında (`kaynak` ↔ `kaynağından`), sonra yankı ayıklayıcısında (`verilecek` ↔ `verilemeyecektir`), şimdi ölçüm aracında.
 
 Buna karşılık OCR etkisi net: aralıklar örtüşmüyor, yani 40 puanlık düşüş rastlantı değil.
 
@@ -188,7 +206,9 @@ Sistemin kalan zayıflığı **tek bir yerde toplanmış durumda: getirme değil
 
 ¹ Taranmış sürüm, aynı sözleşmenin 7., 8. ve 13. sayfalarının taranmış görüntüsüdür. Ayrıntılı çözümleme aşağıda.
 
-³ Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
+³ **Ayrılmış-2**, birinci ayrılmış set harcandıktan *sonra* yapılan değişiklikleri ölçmek için yazıldı (atıf devri düzeltmeleri, yankı ayıklayıcısının tam kelime karşılaştırmasına geçmesi, metin doğrulama katmanı, reranker kararı). Soruların hangi maddelere sorulacağını yazan taraf değil belge belirledi: 62 alt fıkradan üç mevcut setin dokunduğu elendi, kalanlar belge sırasıyla alındı. Yöntem ve sınırları `eval/testset_holdout2.yaml` başlığında yazılıdır. **Ölçüm aleti uyarısı:** bu koşuda bir doğru cevap, ölçüm aracının kusuru yüzünden yanlış işaretlendi (aşağıda). Tablodaki 26/29 **ölçüldüğü gibi** verilmiştir; alet düzeltilmiş hâliyle sonuç 27/29 olurdu.
+
+⁴ Gecikme aynı makinede koşudan koşuya iki kata kadar değişti (p50 için 22–47 sn arası gözlendi). Tek bir sayı yazmak yanıltıcı olurdu; aralık verilmiştir. Doğruluk metrikleri ise tekrarlanan koşularda **birebir sabit** kaldı (`temperature 0.0`, `seed 42`).
 
 ### Ölçüm aletinin doğrulanması
 
@@ -762,10 +782,10 @@ Fark 2,0 puan (kapalı lehine), GA **−10,4 … +14,6** → sıfırı içeriyor
 
 **Toplam sayı, olan biteni gizliyor.** Reranker atıl değil; iki soruyu ters yönlerde değiştirdi ve etkileri birbirini götürdü:
 
-- **Yönetmelik Q6 — getirme İYİLEŞTİ.** Kapalıyken model bilgiyi bulamayıp reddediyordu; açıkken doğru maddeyi getirdi ve ham çıktısı tamamen doğruydu (*"...ek ücret ödenmez; bu çalışmalar karşılığında izin verilir."*). Soru yine de başarısız sayıldı, çünkü **guardrail o cümleyi sildi**: atıf yalnızca sonraki cümlenin sonundaydı ve atıf devri kuralı devreye girmedi (kapanış cümlesi ne "meta" ne de bağlaçla başlıyordu).
+- **Yönetmelik Q6 — üretim davranışı değişti, getirme DEĞİL.** Sonradan yapılan inceleme, iki koşumda da **aynı dört parçanın** getirildiğini gösterdi; yalnızca 2. ve 3. sıradakiler yer değiştirmişti. Reranker kapalıyken model reddetti, açıkken doğru cevabı üretti — bilgi her iki durumda da elindeydi. (Açık koşumda cevap yine de başarısız sayıldı, çünkü guardrail atıfsız asıl cümleyi sildi; bu ayrı bir kusurdu ve düzeltildi.)
 - **Yönetmelik Q11 — getirme KÖTÜLEŞTİ.** Kapsam maddesi ilk 4'ün dışına itildi, yerine belge başlığı ve alakasız maddeler geldi; model haklı olarak reddetti.
 
-Yani reranker sıralamayı gerçekten değiştiriyor, ama bu belgelerde kazandırdığı kadar kaybettiriyor. Bu, öngörünün dayandığı gözlemle tutarlı: dört ölçümde de kalan hataların çoğu getirme değil **üretim** kaynaklıydı, dolayısıyla getirmeyi iyileştiren bir katmanın toplam skoru değiştirmesi için fazla alan yoktu.
+Yani reranker bu belgelerde kazandırdığı kadar kaybettiriyor. Q6 ayrıca beklenmedik bir şey gösterdi: **aynı bilgi, yalnızca farklı sırada verildiğinde model reddetmekten doğru cevap vermeye geçti.** Üretim katmanının bağlam sırasına bu kadar duyarlı olması, "kaynak getirildi ise iş bitti" varsayımının yanlış olduğunu gösteriyor.
 
 > **Gecikme farkı ölçülemedi — ölçüm kusuru, sonuç değil.** Reranker açık koşulardan önce "bellek sıkışmasın" diye diğer uygulamalar kapatıldı; taban koşularda kapatılmamıştı. İki koşu farklı bellek koşullarında yapıldığı için gecikme karşılaştırması geçersizdir (açık koşu p50'si *daha düşük* çıktı, ki eklenen bir model için fiziksel olarak beklenmez). Doğruluk sonucu bundan etkilenmez — üretim tarafı belirlenimcidir. Gecikme maliyeti hâlâ ölçülmemiş durumdadır; ancak doğrulukta kazanç olmadığı için karar değişmez.
 

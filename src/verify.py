@@ -26,7 +26,7 @@ Bu modül iki bağımsız denetim uygular:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 CITATION_RE = re.compile(r"\[K\s*(\d{1,2})\]")
 
@@ -272,7 +272,71 @@ def _distribute_citations(sents: List[str], tag: str) -> List[str]:
     return body
 
 
-def _inherit_trailing_citations(answer: str) -> str:
+def _numbers_allowed(sents: Sequence[str], allowed: Set[str]) -> bool:
+    """Cümlelerdeki her sayı kaynaklarda geçiyor mu?"""
+    for s in sents:
+        for raw in numbers_in(strip_citations(s)):
+            if (raw in allowed
+                    or normalize_number(raw) in allowed
+                    or raw.replace(".", "") in allowed):
+                continue
+            return False
+    return True
+
+
+def _inherit_backward(line: str, allowed: Set[str]) -> Optional[str]:
+    """
+    SON CÜMLE BİLGİ TAŞISA BİLE atıflarını önceki atıfsız cümlelere devret.
+
+    _is_citation_carrier() yalnızca İÇİ BOŞ kapanış cümlelerini taşıyıcı
+    sayar ("Bu bilgi [K1] kaynağından alınmıştır"). Model atfı, bilgi taşıyan
+    bağımsız bir cümlenin sonuna koyduğunda devir çalışmıyor ve asıl cevap
+    siliniyordu. Ölçülmüş vaka (yönetmelik Q6):
+
+        ham    : "Mesai saatleri dışında ek ücret ÖDENMEZ; karşılığında izin
+                  verilir. Verilecek iznin süresi birim amirinin onayına
+                  bağlıdır.[K1]"
+        çıktı  : "Verilecek iznin süresi birim amirinin onayına bağlıdır.[K1]"
+
+    Sorunun cevabı ("ödenmez") silindi, geriye onu cevaplamayan bir cümle
+    kaldı. Bu, tam yanıttan da ret'ten de kötü: eksik ama tam görünen yanıt.
+
+    YÖN ÖNEMLİ — YALNIZCA GERİYE DEVREDİLİR.
+    Modülün baştaki uyarısındaki tehlike tam tersi sırayla gelir:
+
+        "İşin süresi otuziki aydır [K2]. Bu nedenle toplam iş süresi 30 aydır."
+                    ^ atıflı, önce                    ^ atıfsız uydurma, sonra
+
+    Orada atıfsız cümle SONDA olduğu için bu kural hiç devreye girmez ve
+    uydurma cümle eskisi gibi ayıklanır.
+
+    SAYI KAPISI: önceki atıfsız cümlelerdeki her sayı kaynaklarda geçmeli.
+    Bu, açıkça atıf veren cümlelere uygulanan ölçütün aynısıdır; devralınan
+    atfı daha ağır bir şarta bağlamak için sebep yok.
+
+    -> devredilmiş satır, ya da devir uygun değilse None
+    """
+    sents = split_sentences(line)
+    if len(sents) < 2:
+        return None
+    son = sents[-1]
+    onceki = sents[:-1]
+
+    if not CITATION_RE.search(son):
+        return None
+    # Atıfsız ve olgusal bir cümle yoksa devredecek bir şey yok
+    if not any(is_factual(s) and not CITATION_RE.search(s) for s in onceki):
+        return None
+    if not _numbers_allowed(onceki, allowed):
+        return None
+
+    cites = CITATION_RE.findall(son)
+    tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
+    # Taşıyıcı devrinden farkı: son cümle SİLİNMEZ, bilgi taşıyor.
+    return " ".join(_distribute_citations(onceki, tag) + [son])
+
+
+def _inherit_trailing_citations(answer: str, allowed: Optional[Set[str]] = None) -> str:
     """
     Kapanış cümlesindeki atıfları, kendinden önceki atıfsız bilgi cümlelerine
     dağıtır ve kapanış cümlesini kaldırır.
@@ -298,12 +362,15 @@ def _inherit_trailing_citations(answer: str) -> str:
             out_lines.append(line)
             continue
         sents = split_sentences(line)
-        if len(sents) < 2 or not _is_citation_carrier(sents[-1], " ".join(sents[:-1])):
-            out_lines.append(line)
+        if len(sents) >= 2 and _is_citation_carrier(sents[-1], " ".join(sents[:-1])):
+            # Kapanış cümlesi içi boş: atıfları devret, kapanışı AT
+            cites = CITATION_RE.findall(sents[-1])
+            tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
+            out_lines.append(" ".join(_distribute_citations(sents[:-1], tag)))
             continue
-        cites = CITATION_RE.findall(sents[-1])
-        tag = "".join(f"[K{c}]" for c in dict.fromkeys(cites))
-        out_lines.append(" ".join(_distribute_citations(sents[:-1], tag)))
+        # Kapanış cümlesi bilgi taşıyor: atıfları devret, kapanışı KORU
+        geri = _inherit_backward(line, allowed or set())
+        out_lines.append(geri if geri is not None else line)
 
     # ---- 2) Satırlar arası geçiş
     dolu = [i for i, l in enumerate(out_lines) if l.strip()]
@@ -633,7 +700,7 @@ def check(answer: str,
     # ÖNEMLİ: Devir YALNIZCA kapanış cümlesi "meta" ise (bilgi taşımıyorsa)
     # yapılır. Aksi hâlde uydurma bir özet cümlesi de atıf kapıp denetimden
     # geçerdi — asıl engellemek istediğimiz durum tam olarak buydu.
-    answer = _inherit_trailing_citations(answer)
+    answer = _inherit_trailing_citations(answer, allowed)
 
     # ---------- 1) Atıfsız olgusal cümleler
     kept_lines: List[str] = []

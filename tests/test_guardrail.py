@@ -32,6 +32,53 @@ ORAN = ["Depo Müdürü 145 Forklift Operatörü 55"]
 TALIP = ["7 Kiracı kontrat müddetinin son ayı içinde kiralanan şeyi görmek "
          "için gelen taliplerin gezip görmesine karşı koymaz. 8 Kira müddeti..."]
 AVANS = ["5.5. Bu iş için avans verilmeyecektir."]
+MESAI = ["8 Mesai saatleri dışında yapılan çalışmalar için ek ücret ödenmez; "
+         "bu çalışmalar karşılığında izin verilir. Verilecek iznin süresi ve "
+         "kullanım zamanı birim amirinin onayına bağlıdır."]
+
+
+# =====================================================================
+#  GERİYE ATIF DEVRİ — bilgi taşıyan kapanış cümlesi
+# =====================================================================
+#  ÖLÇÜLMÜŞ VAKA (yönetmelik Q6): model doğru cevabı üretti ama atfı,
+#  bilgi taşıyan bağımsız bir cümlenin sonuna koydu. Eski devir kuralı
+#  yalnızca İÇİ BOŞ kapanışları taşıyıcı saydığı için devreye girmedi ve
+#  sorunun cevabı ("ödenmez") silindi; geriye onu cevaplamayan bir cümle
+#  kaldı. Bu, tam yanıttan da ret'ten de kötüdür: eksik ama tam görünür.
+
+def test_bilgi_tasiyan_kapanis_atfini_geriye_devreder():
+    ham = ("Mesai saatleri dışında yapılan çalışmalar için ek ücret ödenmez; "
+           "bu çalışmalar karşılığında izin verilir. Verilecek iznin süresi ve "
+           "kullanım zamanı birim amirinin onayına bağlıdır.[K1]")
+    ok, gerekce, _, temiz = check(
+        ham, MESAI, question="Mesai saatleri dışındaki çalışmalar için ek ücret ödenir mi?")
+    assert ok, gerekce
+    assert "ödenmez" in temiz, "sorunun cevabı silinmemeli"
+    assert "onayına bağlıdır" in temiz, "kapanış cümlesi de korunmalı"
+
+
+def test_geriye_devir_UYDURMA_SAYIYI_gecirmez():
+    """
+    Devrin sayı kapısı. Atıfsız cümlede kaynakta olmayan bir sayı varsa
+    devir yapılmaz; cümle eskisi gibi ayıklanır.
+    """
+    ham = ("Mesai saatleri dışındaki çalışma için 250 TL ek ücret ödenir. "
+           "Verilecek iznin süresi birim amirinin onayına bağlıdır.[K1]")
+    _, _, _, temiz = check(ham, MESAI, question="Ek ücret ne kadar?")
+    assert "250" not in temiz, "kaynakta olmayan sayı devralınıp kalmamalı"
+
+
+def test_geriye_devir_TERS_SIRAYI_etkilemez():
+    """
+    Asıl tehlike ters sıradadır: atıflı doğru cümle ÖNCE, atıfsız uydurma
+    özet SONRA. Geriye devir yalnızca son cümle atıflıyken çalışır,
+    dolayısıyla bu durum eskisi gibi ayıklanmalıdır.
+    """
+    ham = ("İşin süresi otuziki (32) aydır [K1]. "
+           "Bu nedenle toplam iş süresi 30 aydır.")
+    _, _, _, temiz = check(ham, SURE, question="İşin süresi nedir?")
+    assert "30 aydır" not in temiz, "uydurma özet cümlesi hâlâ ayıklanmalı"
+    assert "32" in temiz
 
 
 # =====================================================================
