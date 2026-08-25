@@ -32,7 +32,9 @@ ensure_directories(CFG)
 import json  # noqa: E402
 import mimetypes  # noqa: E402
 import os  # noqa: E402
+import queue  # noqa: E402
 import sys  # noqa: E402
+import traceback  # noqa: E402
 
 import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -192,18 +194,87 @@ def api_ingest(payload: Dict[str, Any] = Body(default={})) -> Dict[str, Any]:
                 f"{type(exc).__name__}: {exc}"
             ) from exc
 
-        out = {
-            "added": rep["added"], "updated": rep["updated"],
-            "unchanged": rep["unchanged"], "removed": rep["removed"],
-            "failed": rep["failed"], "duration_s": rep.get("duration_s", 0),
-            "chunks": rep.get("collection_count", 0),
-            "ocr_used": rep.get("ocr_used", []),
-            "ocr_low_quality": rep.get("ocr_low_quality", []),
-        }
+        out = _ingest_ozeti(rep)
         _save_report(out)   # belge durumu paneli bunu okur
         return out
     finally:
         _ingest_lock.release()
+
+
+def _ingest_ozeti(rep: Dict[str, Any]) -> Dict[str, Any]:
+    """Ham indeksleme raporundan arayüzün beklediği özeti üretir."""
+    return {
+        "added": rep["added"], "updated": rep["updated"],
+        "unchanged": rep["unchanged"], "removed": rep["removed"],
+        "failed": rep["failed"], "duration_s": rep.get("duration_s", 0),
+        "chunks": rep.get("collection_count", 0),
+        "ocr_used": rep.get("ocr_used", []),
+        "ocr_low_quality": rep.get("ocr_low_quality", []),
+    }
+
+
+@app.get("/api/ingest/stream")
+def api_ingest_stream(rebuild: bool = False) -> StreamingResponse:
+    """
+    İNDEKSLEME İLERLEMESİNİ CANLI AKITIR.
+
+    NEDEN: POST /api/ingest yanıtı ancak iş bittiğinde döner. 28 sayfalık
+    taranmış bir PDF'te bu birkaç dakika sürüyor ve arayüzde yalnızca
+    "Belgeler işleniyor…" yazıyor. Kullanıcı sistemin çalıştığını mı yoksa
+    donduğunu mu anlayamıyor — OCR'da bu fark kritik, çünkü OCR sayfa
+    başına 3-10 saniye harcıyor ve hiçbir çıktı üretmiyor.
+
+    ingest() zaten progress_cb alıyordu, /api/chat'te SSE zaten kuruluydu;
+    bu uç yalnızca ikisini birbirine bağlıyor.
+
+    TASARIM: ingest() eşzamanlıdır ve akış üreticisini bloklar. Bu yüzden
+    ayrı bir iş parçacığında çalışır, ilerleme kuyruğa yazılır, üretici
+    kuyruğu boşaltır.
+
+    KİLİT İŞ PARÇACIĞINDA BIRAKILIR, üreticide değil: tarayıcı sekmeyi
+    kapatırsa üretici hemen durur ama indeksleme sürer. Kilit üreticide
+    bırakılsaydı, hâlâ çalışan bir indekslemenin üzerine ikincisi başlardı.
+    """
+    if not _ingest_lock.acquire(blocking=False):
+        raise HTTPException(409, "İndeksleme zaten sürüyor.")
+
+    olaylar: "queue.Queue[Any]" = queue.Queue()
+
+    def calistir() -> None:
+        try:
+            from src.ingest import ingest
+            rep = ingest(
+                cfg=CFG, rebuild=rebuild, verbose=False,
+                progress_cb=lambda pct, msg: olaylar.put(
+                    {"type": "progress", "pct": round(float(pct), 3),
+                     "message": str(msg)}),
+            )
+            get_engine().refresh()
+            out = _ingest_ozeti(rep)
+            _save_report(out)
+            olaylar.put({"type": "done", "report": out})
+        except Exception as exc:
+            traceback.print_exc()   # tam iz sunucu konsolunda kalır
+            olaylar.put({"type": "error",
+                         "message": f"{type(exc).__name__}: {exc}"})
+        finally:
+            olaylar.put(None)       # akış sonu işareti
+            _ingest_lock.release()
+
+    threading.Thread(target=calistir, daemon=True).start()
+
+    def akis() -> Generator[str, None, None]:
+        while True:
+            ev = olaylar.get()
+            if ev is None:
+                break
+            yield _sse(ev)
+
+    return StreamingResponse(
+        akis(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 LAST_REPORT = None  # son indeksleme raporunun yolu (aşağıda çözülür)

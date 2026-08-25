@@ -190,6 +190,7 @@ class RAGEngine:
         self.llm = LocalLLM(self.cfg)
         self._collection = None
         self._reranker = None
+        self._reranker_failed = False   # uyarı bir kez basılsın
         self._bm25 = None            # BM25 indeksi (tembel kurulur)
         self._bm25_ids: List[str] = []
         self._bm25_count = -1        # hangi parça sayısıyla kuruldu
@@ -243,15 +244,41 @@ class RAGEngine:
         return info
 
     def _get_reranker(self):
+        """
+        Reranker'ı tembel yükler.
+
+        SESSİZ BAŞARISIZLIK BURADA KABUL EDİLEMEZ. Eski hâli, model klasörü
+        yoksa hiçbir şey söylemeden None dönüyordu: kullanıcı ayarı açıyor,
+        sistem reranker'sız çalışmaya devam ediyor, kimse fark etmiyor.
+        Ölçüm bağlamında bu daha da kötü — "açık" sanılan bir koşu aslında
+        kapalı çalışır ve "fark yok" sonucu tamamen sahte olur.
+
+        Ayar AÇIKKEN yükleme başarısızsa artık gürültülü uyarı veriyor.
+        """
         if not self.cfg.get_path("reranker.enabled", False):
             return None
         if self._reranker is not None:
             return self._reranker
+        if self._reranker_failed:
+            return None            # her soruda tekrar denenip uyarı basmasın
+
         path = self.cfg.resolve("reranker.model_path")
         if not path.exists():
+            self._reranker_failed = True
+            print(f"[!] RERANKER AÇIK AMA MODEL YOK: {path}\n"
+                  f"    Sistem reranker'SIZ çalışacak. İndirmek için:\n"
+                  f"    python scripts/download_models.py --out models --with-reranker",
+                  flush=True)
             return None
-        from sentence_transformers import CrossEncoder
-        self._reranker = CrossEncoder(str(path), device="cpu", local_files_only=True)
+        try:
+            from sentence_transformers import CrossEncoder
+            self._reranker = CrossEncoder(str(path), device="cpu",
+                                          local_files_only=True)
+        except Exception as exc:
+            self._reranker_failed = True
+            print(f"[!] RERANKER YÜKLENEMEDİ ({type(exc).__name__}: {exc})\n"
+                  f"    Sistem reranker'SIZ çalışacak.", flush=True)
+            return None
         return self._reranker
 
     # -------------------------------------------------- getirme
@@ -405,7 +432,10 @@ class RAGEngine:
             for c, s in zip(kept, scores, strict=True):
                 c["rerank_score"] = float(s)
             kept.sort(key=lambda c: c.get("rerank_score", 0.0), reverse=True)
-            final_k = int(self.cfg.get_path("reranker.top_n", final_k))
+            # top_n belirtilmemişse final_k korunur. Aksi hâlde reranker'ı
+            # açmak parça SAYISINI da değiştirir ve açık/kapalı ölçümü iki
+            # değişken birden taşır; hangisinin etkisi olduğu ayrılamaz.
+            final_k = int(self.cfg.get_path("reranker.top_n", None) or final_k)
 
         return kept[:final_k], top_sim, retrieved
 

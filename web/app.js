@@ -177,51 +177,83 @@
     E.file.value = "";
   }
 
+  // İndeksleme raporunu tek satırlık özete çevirir.
+  function ingestOzeti(r) {
+    const bits = [];
+    if (r.added?.length) bits.push(`${r.added.length} yeni`);
+    if (r.updated?.length) bits.push(`${r.updated.length} güncel`);
+    if (r.unchanged?.length) bits.push(`${r.unchanged.length} değişmedi`);
+    if (r.removed?.length) bits.push(`${r.removed.length} silindi`);
+    let base = (bits.join(" · ") || "değişiklik yok") + ` · ${r.chunks} parça (${r.duration_s} sn)`;
+    if (r.ocr_used?.length) base += ` · ${r.ocr_used.length} taranmış belge OCR ile okundu`;
+
+    if (r.failed?.length) {
+      say("warn", base + " — Hatalı: " + r.failed.map((f) => `${f.file}: ${f.error}`).join(" | "));
+    } else if (r.ocr_low_quality?.length) {
+      // Bozuk OCR sessiz bir yanlış bilgi kaynağıdır: model bozuk sayıyı
+      // kaynaktan okur ve sayı denetimi de onu onaylar. Kullanıcı hangi
+      // sayfaların şüpheli olduğunu bilmeli.
+      const list = r.ocr_low_quality
+        .map((w) => `${w.file} → sayfa ${w.pages.join(", ")}`).join(" | ");
+      say("warn", base + ` — OCR kalitesi düşük: ${list}. Bu sayfalardan gelen ` +
+          "sayıları kaynak belgeden doğrulayın.");
+    } else {
+      say("ok", base);
+    }
+  }
+
+  // İNDEKSLEME İLERLEMESİ CANLI GÖSTERİLİR.
+  // Eskiden yalnızca "Belgeler işleniyor…" yazıyordu ve iş bitene kadar
+  // hiçbir şey değişmiyordu. Taranmış bir PDF'te OCR sayfa başına 3-10 sn
+  // sürüyor; kullanıcı sistemin donduğunu sanıyordu. Sunucu artık
+  // ilerlemeyi SSE ile akıtıyor (/api/ingest/stream).
   async function runIngest(rebuild) {
     E.ingest.disabled = E.rebuild.disabled = true;
-    say("", rebuild ? "İndeks sıfırdan kuruluyor…" : "Belgeler işleniyor… (taranmış PDF varsa uzun sürebilir)");
+    say("", rebuild ? "İndeks sıfırdan kuruluyor…" : "Belgeler işleniyor…");
     try {
-      // Sunucu hata döndürdüğünde gövde JSON OLMAYABİLİR ("Internal Server
-      // Error" düz metindir). Doğrudan .json() çağırmak, kullanıcıya asıl
-      // hata yerine "Unexpected token 'I'" gösteriyordu.
-      const resp = await fetch("/api/ingest", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rebuild: !!rebuild }),
-      });
-      const govde = await resp.text();
-      let r;
-      try {
-        r = JSON.parse(govde);
-      } catch {
-        throw new Error(
-          resp.status === 500
-            ? `Sunucu hatası (${resp.status}). Ayrıntı sunucu konsolunda: ` +
-              govde.slice(0, 160)
-            : `Beklenmeyen yanıt (${resp.status}): ${govde.slice(0, 160)}`
-        );
+      const res = await fetch(`/api/ingest/stream?rebuild=${rebuild ? "true" : "false"}`);
+      if (!res.ok || !res.body) {
+        // Hata gövdesi JSON OLMAYABİLİR ("Internal Server Error" düz metindir).
+        // Doğrudan .json() çağırmak "Unexpected token 'I'" üretiyordu.
+        const govde = await res.text();
+        let detay = govde.slice(0, 160);
+        try { detay = JSON.parse(govde).detail || detay; } catch { /* düz metin */ }
+        throw new Error(`Sunucu hatası (${res.status}): ${detay}`);
       }
-      if (!resp.ok) throw new Error(r.detail || `Sunucu hatası (${resp.status})`);
-      const bits = [];
-      if (r.added?.length) bits.push(`${r.added.length} yeni`);
-      if (r.updated?.length) bits.push(`${r.updated.length} güncel`);
-      if (r.unchanged?.length) bits.push(`${r.unchanged.length} değişmedi`);
-      if (r.removed?.length) bits.push(`${r.removed.length} silindi`);
-      let base = (bits.join(" · ") || "değişiklik yok") + ` · ${r.chunks} parça (${r.duration_s} sn)`;
-      if (r.ocr_used?.length) base += ` · ${r.ocr_used.length} taranmış belge OCR ile okundu`;
 
-      if (r.failed?.length) {
-        say("warn", base + " — Hatalı: " + r.failed.map((f) => `${f.file}: ${f.error}`).join(" | "));
-      } else if (r.ocr_low_quality?.length) {
-        // Bozuk OCR sessiz bir yanlış bilgi kaynağıdır: model bozuk sayıyı
-        // kaynaktan okur ve sayı denetimi de onu onaylar. Kullanıcı hangi
-        // sayfaların şüpheli olduğunu bilmeli.
-        const list = r.ocr_low_quality
-          .map((w) => `${w.file} → sayfa ${w.pages.join(", ")}`).join(" | ");
-        say("warn", base + ` — OCR kalitesi düşük: ${list}. Bu sayfalardan gelen ` +
-            "sayıları kaynak belgeden doğrulayın.");
-      } else {
-        say("ok", base);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let carry = "", rapor = null, hata = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        carry += dec.decode(value, { stream: true });
+        const frames = carry.split("\n\n");
+        carry = frames.pop();
+
+        for (const f of frames) {
+          const line = f.trim();
+          if (!line.startsWith("data:")) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+
+          if (ev.type === "progress") {
+            say("", `%${Math.round((ev.pct || 0) * 100)} — ${ev.message}`);
+          } else if (ev.type === "done") {
+            rapor = ev.report;
+          } else if (ev.type === "error") {
+            hata = ev.message;
+          }
+        }
       }
+
+      if (hata) throw new Error(hata);
+      // AKIŞ SESSİZCE KESİLİRSE BAŞARILI SAYILMAMALI. "done" olayı
+      // gelmediyse indekslemenin bittiğini bilmiyoruz demektir.
+      if (!rapor) throw new Error("Akış tamamlanmadan kesildi; indeksleme durumu bilinmiyor.");
+
+      ingestOzeti(rapor);
       await Promise.all([status(), docs()]);
     } catch (e) { say("bad", "İndeksleme başarısız: " + e.message); }
     E.ingest.disabled = E.rebuild.disabled = false;

@@ -39,6 +39,14 @@ torch==2.4.1
 sentence-transformers==3.2.1
 transformers==4.44.2
 tokenizers==0.19.1
+# huggingface_hub SABİTLENMİŞTİR — dolaylı bağımlılık olsa da bırakılamaz.
+#
+# Gerçekte yaşandı: `pip install -U ... sentence-transformers` komutu
+# sentence-transformers'ı 6.x'e, transformers'ı 5.x'e, hub'ı 1.x'e çekti.
+# Yeni sürümler torch >= 2.5 istiyor, proje 2.4.1'e sabitli. Embedding
+# "name 'torch' is not defined" ile çöktü ve indeksleme sıfır parça üretti.
+# hub 1.x ayrıca transformers 4.44'ün beklediği API'yi kaldırıyor (<1.0 şartı).
+huggingface_hub==0.36.2
 numpy==1.26.4
 
 # --- Vektör veri tabanı ---

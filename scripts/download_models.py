@@ -6,9 +6,25 @@ Air-gap makineye taşınacak tüm yapay zekâ modellerini indirir ve
 `models/` klasörüne, çevrimdışı yüklenebilir formatta yerleştirir.
 
 Kullanım (internetli makine):
-    pip install -U "huggingface_hub>=0.25" sentence-transformers
     python scripts/download_models.py --out models
     python scripts/download_models.py --out models --with-reranker
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  UYARI — BU BETİK İÇİN PAKET YÜKSELTMEYİN                            ║
+║                                                                      ║
+║  Bu dosyanın eski hâli şunu söylüyordu:                              ║
+║      pip install -U "huggingface_hub>=0.25" sentence-transformers    ║
+║                                                                      ║
+║  Bu komut proje sanal ortamında çalıştırıldığında sentence-          ║
+║  transformers'ı 6.x'e, transformers'ı 5.x'e yükseltti. İkisi de      ║
+║  torch >= 2.5 istiyor; proje torch 2.4.1'e sabitli. Sonuç:           ║
+║  "name 'torch' is not defined" ve embedding tamamen çalışmaz hâle    ║
+║  geldi — indeksleme sıfır parça üretti.                              ║
+║                                                                      ║
+║  Bu betik zaten projenin kendi bağımlılıklarıyla çalışır. Ek kurulum ║
+║  GEREKMEZ. Yeni bir ortamda çalıştırıyorsanız sürümleri SABİTLEYİN:  ║
+║      pip install -r requirements.txt                                 ║
+╚══════════════════════════════════════════════════════════════════════╝
 
 Sonra `models/` klasörünü USB/onaylı transfer yöntemiyle air-gap makineye
 kopyalayın. Air-gap makinede bu betik ÇALIŞTIRILMAZ.
@@ -58,11 +74,21 @@ MODELS = {
 }
 
 
-def download(name: str, out_root: Path) -> Path:
+def download(name: str, out_root: Path, force: bool = False) -> Path:
     from huggingface_hub import snapshot_download
 
     spec = MODELS[name]
     target = out_root / name
+    # ZATEN İNDİRİLMİŞ MODELİ TEKRAR ÇEKME.
+    # --with-reranker bayrağı embedding modelini de listeye aldığı için,
+    # yalnızca reranker eklemek isteyen kullanıcı 2,3 GB'ı boşuna indiriyordu.
+    # Ağırlık dosyası iki addan biriyle gelir; yalnızca birine bakmak yetmez
+    # (bge-m3 pytorch_model.bin, çoğu yeni model model.safetensors kullanır).
+    agirlik_var = any(target.rglob("*.safetensors")) or any(target.rglob("*.bin"))
+    if target.exists() and agirlik_var and not force:
+        print(f"\n= {name} zaten mevcut, atlanıyor ({target})")
+        print("  Yeniden indirmek için: --force")
+        return target
     print(f"\n▶ {name} indiriliyor ({spec['size']}) — {spec['repo']}")
     snapshot_download(
         repo_id=spec["repo"],
@@ -86,6 +112,42 @@ def verify_load(path: Path) -> bool:
     except Exception as exc:
         print(f"  ✖ Yükleme testi BAŞARISIZ: {exc}")
         return False
+
+
+def verify_reranker(path: Path) -> bool:
+    """
+    Reranker bir CrossEncoder'dır, SentenceTransformer değil; ayrı doğrulanır.
+
+    NEDEN GEREKLİ: eksik indirilmiş bir reranker, `_get_reranker()` içinde
+    sessizce None döner ve sistem hiçbir uyarı vermeden reranker'sız çalışır.
+    Kullanıcı "açtım ama bir şey değişmedi" durumunda kalır. Burada
+    yüklenebildiği VE anlamlı sıraladığı doğrulanır.
+    """
+    try:
+        from sentence_transformers import CrossEncoder
+        m = CrossEncoder(str(path), device="cpu", local_files_only=True)
+        soru = "Personele ödenecek günlük yemek bedeli ne kadardır?"
+        ilgili = "Personele her fiilî çalışma günü için 145,00 TL yemek bedeli ödenir."
+        alakasiz = "Depoda 12 adet güvenlik kamerası bulunmaktadır."
+        s_ilgili, s_alakasiz = m.predict([(soru, ilgili), (soru, alakasiz)])
+        print(f"  ✔ Yükleme testi başarılı — ilgili {s_ilgili:.3f} / "
+              f"alakasız {s_alakasiz:.3f}")
+        if s_ilgili <= s_alakasiz:
+            print("  ✖ UYARI: ilgili parça alakasızdan yüksek puan ALMADI. "
+                  "Model bozuk indirilmiş olabilir.")
+            return False
+        return True
+    except Exception as exc:
+        print(f"  ✖ Yükleme testi BAŞARISIZ: {exc}")
+        return False
+
+
+def _read_manifest(out_root: Path) -> list:
+    try:
+        data = json.loads((out_root / "MANIFEST.json").read_text(encoding="utf-8"))
+        return [m for m in data.get("models", []) if m.get("name") in MODELS]
+    except Exception:
+        return []
 
 
 def write_manifest(out_root: Path, entries: list) -> None:
@@ -119,6 +181,8 @@ def main() -> int:
     ap.add_argument("--with-reranker", action="store_true",
                     help="Cross-encoder reranker'ı da indir")
     ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="Zaten indirilmiş modeli yeniden indir")
     args = ap.parse_args()
 
     out_root = Path(args.out).resolve()
@@ -132,11 +196,19 @@ def main() -> int:
 
     ok = True
     for name in todo:
-        p = download(name, out_root)
-        if not args.no_verify and name != "bge-reranker-v2-m3":
+        p = download(name, out_root, force=args.force)
+        if args.no_verify:
+            continue
+        if name == "bge-reranker-v2-m3":
+            ok = verify_reranker(p) and ok
+        else:
             ok = verify_load(p) and ok
 
-    write_manifest(out_root, todo)
+    # MANIFEST ÜZERİNE YAZILMAZ, BİRLEŞTİRİLİR.
+    # Yalnızca reranker eklendiğinde önceki kayıtlar siliniyordu ve transfer
+    # bütünlüğü dosyası eksik kalıyordu.
+    mevcut = [m["name"] for m in _read_manifest(out_root)]
+    write_manifest(out_root, list(dict.fromkeys(mevcut + todo)))
 
     print("\n" + "=" * 62)
     print("SONRAKİ ADIMLAR")

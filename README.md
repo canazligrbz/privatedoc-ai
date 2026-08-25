@@ -574,6 +574,8 @@ Artımlı indeksleme SHA-256 özetine dayanır: değişmemiş dosya yeniden işl
 
 > **Arayüzden yüklenen belgeler otomatik indekslenmez.** Yükleme sonrası çekmecedeki *"İndeksi güncelle"* düğmesine basın veya `indeksle.bat` çalıştırın. Belge listesindeki işaretler durumu gösterir: ● indekslendi · ○ indekslenmedi · ▲ hata.
 
+> **İlerleme canlı gösterilir.** İndeksleme SSE ile akıtılır (`GET /api/ingest/stream`): hangi dosyanın işlendiği, OCR'ın kaçıncı sayfada olduğu ve vektörleştirme aşaması anlık görünür. Taranmış bir PDF'te OCR sayfa başına 3–10 saniye sürdüğü için bu geri bildirim olmadan arayüz donmuş gibi görünüyordu. Akış beklenmedik şekilde kesilirse işlem **başarılı sayılmaz** — sunucu "bitti" olayını göndermediyse indeksleme durumu bilinmiyor demektir.
+
 ### 5.3 Başlatma
 
 ```bash
@@ -741,8 +743,31 @@ Bu tek parametre sistemin "fazla konuşkan" mı "fazla suskun" mu olacağını b
 1. **Belge kalitesi** — taranmış PDF'lere iyi OCR, bozuk karakterlerin düzeltilmesi. *En yüksek etki, sıfır çalışma zamanı maliyeti.*
 2. **Eşik kalibrasyonu** (§7.2) — bedava.
 3. **`chunk_size` denemesi** — 500 / 700 / 1000 ile üç kez `--rebuild` + eval. *Birkaç saat.*
-4. **Reranker'ı açmak** (`reranker.enabled: true`) — isabeti belirgin artırır, soru başına **+3–8 sn** CPU maliyeti.
+4. **Reranker'ı açmak** (`reranker.enabled: true`) — **ölçüldü, kazanç çıkmadı.** 49 soruda 45/49 → 44/49; farkın güven aralığı −10,4 … +14,6 puan, sıfırı içeriyor. Varsayılan kapalı bırakıldı. Ayrıntı aşağıda.
 5. **14B modele geçmek** — 32 GB RAM gerektirir, hız ~%40 düşer.
+
+#### Reranker ölçümü — negatif bulgu
+
+Cross-encoder yeniden sıralayıcı (`bge-reranker-v2-m3`) indirildi ve açık/kapalı olarak iki geliştirme setinde koşuldu. Ölçümden önce iki şey yazıldı: **öngörü** ("kazanç çıkmayacak, çünkü darboğaz getirme değil üretim") ve **durma kuralı** ("farkın GA'sı sıfırı içeriyorsa kapalı kalır").
+
+| | Reranker kapalı | Reranker açık |
+|---|---|---|
+| Depo geliştirme (29) | 28/29 | 28/29 |
+| Yönetmelik (20) | 17/20 | 16/20 |
+| **Toplam (49)** | **45/49 · %91,8** | **44/49 · %89,8** |
+
+Fark 2,0 puan (kapalı lehine), GA **−10,4 … +14,6** → sıfırı içeriyor. **Gösterilebilir kazanç yok.**
+
+**Ölçüm hazırlığında bulunan tuzak:** `reranker.top_n` 5, `retrieval.final_k` ise 4 idi. Reranker açıldığında `top_n`, `final_k`'nın yerine geçtiği için karşılaştırma iki şeyi birden değiştirecekti — parçaların sıralaması *ve sayısı*. Skor değişseydi hangisinin etkisi olduğu ayrılamazdı. `top_n` 4'e çekilerek ölçüm tek değişkenli hale getirildi.
+
+**Toplam sayı, olan biteni gizliyor.** Reranker atıl değil; iki soruyu ters yönlerde değiştirdi ve etkileri birbirini götürdü:
+
+- **Yönetmelik Q6 — getirme İYİLEŞTİ.** Kapalıyken model bilgiyi bulamayıp reddediyordu; açıkken doğru maddeyi getirdi ve ham çıktısı tamamen doğruydu (*"...ek ücret ödenmez; bu çalışmalar karşılığında izin verilir."*). Soru yine de başarısız sayıldı, çünkü **guardrail o cümleyi sildi**: atıf yalnızca sonraki cümlenin sonundaydı ve atıf devri kuralı devreye girmedi (kapanış cümlesi ne "meta" ne de bağlaçla başlıyordu).
+- **Yönetmelik Q11 — getirme KÖTÜLEŞTİ.** Kapsam maddesi ilk 4'ün dışına itildi, yerine belge başlığı ve alakasız maddeler geldi; model haklı olarak reddetti.
+
+Yani reranker sıralamayı gerçekten değiştiriyor, ama bu belgelerde kazandırdığı kadar kaybettiriyor. Bu, öngörünün dayandığı gözlemle tutarlı: dört ölçümde de kalan hataların çoğu getirme değil **üretim** kaynaklıydı, dolayısıyla getirmeyi iyileştiren bir katmanın toplam skoru değiştirmesi için fazla alan yoktu.
+
+> **Gecikme farkı ölçülemedi — ölçüm kusuru, sonuç değil.** Reranker açık koşulardan önce "bellek sıkışmasın" diye diğer uygulamalar kapatıldı; taban koşularda kapatılmamıştı. İki koşu farklı bellek koşullarında yapıldığı için gecikme karşılaştırması geçersizdir (açık koşu p50'si *daha düşük* çıktı, ki eklenen bir model için fiziksel olarak beklenmez). Doğruluk sonucu bundan etkilenmez — üretim tarafı belirlenimcidir. Gecikme maliyeti hâlâ ölçülmemiş durumdadır; ancak doğrulukta kazanç olmadığı için karar değişmez.
 
 ### 7.4 Belge tipine göre chunk önerileri
 
@@ -961,7 +986,8 @@ Bu bölüm, sistemin ölçülmüş zayıflıklarını tek yerde toplar. Hepsi ö
 
 - **Air-gap koruması süreç düzeyinde.** `airgap.py` uygulama sürecini yamalar; Ollama ayrı süreçtir ve kapsam dışıdır. Makine düzeyinde yalıtım için ağ arayüzü kapatılmalıdır.
 - **Tek kullanıcı, kimlik doğrulama yok.** Çok kullanıcılı kurulum için önüne SSO/LDAP doğrulaması yapan bir ters vekil sunucu gerekir.
-- **Reranker ölçülmedi.** Varsayılan olarak kapalı; açık/kapalı karşılaştırması yapılmadığı için kazancı hakkında sayısal bir iddia yok.
+- **Reranker'ın gecikme maliyeti hâlâ ölçülmedi.** Doğruluk tarafı ölçüldü (kazanç yok, §7.3), ancak gecikme karşılaştırması iki koşunun farklı bellek koşullarında yapılması yüzünden geçersiz kaldı. Doğrulukta kazanç olmadığı için varsayılan kapalı; model ağırlıkları depoda gelmez, ayrıca indirilmelidir.
+- **Guardrail hâlâ doğru cevap silebiliyor.** Atıf devri (`_inherit_trailing_citations`) yalnızca kapanış cümlesi "meta" ya da bağlaçla başlıyorsa çalışır. Model bilgiyi atıfsız yazıp atfı, bağlaçla başlamayan bağımsız bir cümlenin sonuna koyarsa, bilgi cümlesi silinir ve geriye eksik bir yanıt kalır. Reranker ölçümünde gerçekleşti (yönetmelik Q6): ham çıktı tamamen doğruydu, kullanıcıya ulaşan yanıt sorunun cevabını içermiyordu.
 
 ---
 

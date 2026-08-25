@@ -340,6 +340,11 @@ def ingest(cfg: Optional[Config] = None,
                     log(f"[-] {rel}: {removed} eski parça silindi")
 
                 log(f"[+] {rel}: {len(chunks)} parça vektörleştiriliyor...")
+                # Vektörleştirme, OCR'dan sonraki ikinci yavaş aşamadır
+                # (97 parça ≈ 14 sn) ve konsolda ilerleme çubuğu görünse de
+                # ARAYÜZE hiçbir şey ulaşmıyordu. Kullanıcı için "işlem
+                # sürüyor" bilgisi burada da gerekli.
+                progress(pct, f"{path.name}: {len(chunks)} parça vektörleştiriliyor…")
                 vectors = embed_passages([c.text for c in chunks], show_progress=verbose)
                 vectorstore.upsert(
                     collection,

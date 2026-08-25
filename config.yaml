@@ -178,7 +178,16 @@ ocr:
 reranker:
   enabled: false               # CPU-only'de varsayılan KAPALI (yavaşlatır ~3-8 sn)
   model_path: "models/bge-reranker-v2-m3"
-  top_n: 5
+  # top_n, retrieval.final_k İLE AYNI OLMALIDIR.
+  #
+  # Burası 5, final_k ise 4 idi. Reranker açıldığında top_n final_k'nın yerine
+  # geçtiği için, açık/kapalı karşılaştırması İKİ ŞEYİ birden değiştiriyordu:
+  # parçaların SIRALAMASI ve SAYISI (4 → 5). Skor değişseydi hangisinden
+  # kaynaklandığı ayrılamazdı. Ölçüm yapılabilsin diye 4'e çekildi.
+  #
+  # Reranker'a daha fazla parça verip aralarından seçtirmek istenirse bu
+  # ayrı bir deneydir ve final_k ile birlikte ayarlanmalıdır.
+  top_n: 4
   batch_size: 4
 
 guardrail:

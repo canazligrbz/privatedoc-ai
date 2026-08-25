@@ -91,6 +91,38 @@ def t_packages():
     return (not missing), ("tümü kurulu" if not missing else f"eksik: {', '.join(missing)}")
 
 
+def t_surum_uyumu():
+    """
+    transformers, kurulu torch'u GERÇEKTEN görebiliyor mu?
+
+    NEDEN AYRI BİR KONTROL: transformers, torch'u içe aktaramazsa hata
+    VERMEZ — sessizce "PyTorch yok" moduna düşer ve yalnızca tokenizer
+    işlevlerini açık tutar. Model yüklemeye kalkınca ortaya çıkan hata
+    "name 'torch' is not defined" oluyor; bu mesaj sebebi hiç anlatmıyor.
+
+    Gerçekte yaşandı: `pip install -U sentence-transformers` komutu
+    transformers'ı 5.x'e yükseltti, o da torch >= 2.5 istiyordu, projede
+    2.4.1 vardı. İndeksleme hatasız görünen bir çıktıyla SIFIR parça üretti.
+    """
+    import torch
+    import transformers
+    t_sur = torch.__version__.split("+")[0]
+    parcalar = tuple(int(x) for x in t_sur.split(".")[:2])
+
+    gorunur = getattr(transformers.utils, "is_torch_available", lambda: True)()
+    if gorunur:
+        return True, (f"torch {torch.__version__} · "
+                      f"transformers {transformers.__version__} — uyumlu")
+
+    return False, (
+        f"transformers {transformers.__version__} kurulu torch "
+        f"{torch.__version__} sürümünü GÖREMİYOR (muhtemelen >= 2.5 istiyor, "
+        f"sende {parcalar[0]}.{parcalar[1]}). Embedding çalışmaz. Düzeltme: "
+        "pip install \"huggingface_hub==0.36.2\" \"tokenizers==0.19.1\" "
+        "\"transformers==4.44.2\" \"sentence-transformers==3.2.1\""
+    )
+
+
 def t_airgap():
     r = selftest()
     if r["external_blocked"] is True:
@@ -300,6 +332,9 @@ def main() -> int:
     check("Air-gap koruması (süreç içi)", t_airgap)
     check("Makine yalıtımı (süreç DIŞI)", t_machine_isolation)
     check("Embedding modeli dosyaları", t_models_dir)
+    # Sürüm uyumu, embedding üretiminden ÖNCE gelmeli: uyumsuzlukta
+    # embedding testi "name 'torch' is not defined" der ve sebebi gizler.
+    check("torch ↔ transformers sürüm uyumu", t_surum_uyumu)
     check("Embedding üretimi", t_embedding)
     check("Vektör veri tabanı", t_vectordb)
     check("LLM servisi", t_llm)
