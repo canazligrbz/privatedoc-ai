@@ -1,0 +1,252 @@
+# =====================================================================
+# KİLİTLİ — İKİNCİ AYRILMIŞ SET
+# İNDEKS: depo_sozlesmesi.pdf
+# ---------------------------------------------------------------------
+# BU SET GELİŞTİRME SIRASINDA ÇALIŞTIRILMAZ. Ayarlar dondurulduktan
+# sonra TEK SEFER koşulur:
+#
+#     python -m src.ingest --rebuild --path ornek_belgeler/dijital
+#     python eval/run_eval.py --testset eval/testset_holdout2.yaml --holdout
+#
+# ---------------------------------------------------------------------
+# NEDEN İKİNCİ BİR AYRILMIŞ SET GEREKTİ
+#
+# Birinci ayrılmış set (testset_holdout.yaml) HARCANDI: bir kez açıldı,
+# sonucu raporlandı. Ondan sonra sistemde şunlar değişti:
+#
+#   · atıf devri ve meta cümle ayıklama düzeltmeleri
+#   · yankı ayıklayıcısının tam kelime karşılaştırmasına geçmesi
+#   · metin doğrulama katmanının eklenmesi (uyarı kipinde)
+#   · reranker'ın ölçülüp kapalı bırakılması
+#
+# Ayrıca metin doğrulama katmanının beyaz listesi GELİŞTİRME SETİNE
+# BAKILARAK büyütüldü; o katmanın %5,4'lük yanlış alarm oranı bu yüzden
+# iyimser bir sayıdır ve temiz bir sette doğrulanması gerekir.
+#
+# ---------------------------------------------------------------------
+# SORULARIN SEÇİLME YÖNTEMİ — BULAŞMAYI SINIRLAMA
+#
+# Bu seti yazan taraf, projedeki bütün hata kayıtlarını görmüştü: ay adı
+# eşleşmesi, madde numarası çakışması, hangi sayfalarda tablo satır bölme
+# çalışmadığı, guardrail'in hangi cümle düzeninde doğru cevabı sildiği.
+# Sorular serbestçe yazılsaydı, bilinen zayıf noktalardan kaçınmak ya da
+# üstlerine gitmek mümkün olurdu; iki durumda da çıkan sayı "görülmemiş
+# sorularda ne oluyor" sorusunun cevabı olmazdı.
+#
+# Bu yüzden soruların NEREYE sorulacağına yazan değil, belge karar verdi:
+#
+#   1. Belgedeki 62 alt fıkra çıkarıldı.
+#   2. Mevcut ÜÇ setin (geliştirme, birinci ayrılmış, taranmış) dokunduğu
+#      fıkralar elendi — hem fıkra numarasından hem soru konusundan.
+#   3. Geriye kalan fıkralar BELGE SIRASIYLA alındı; her birinden bir
+#      soru yazıldı. Hangi fıkraya soru sorulacağı seçilmedi.
+#   4. Hata kayıtlarına, önceki koşuların çıktılarına ve başarısız soru
+#      listelerine bu set yazılırken BAKILMADI.
+#
+# ELENEN FIKRALAR (konu örtüşmesi nedeniyle, kayıt için):
+#   4.2  süre uzatımı — geliştirme setindeki bir sorunun notunda geçiyor
+#   5.2  hakediş belgesi — birinci ayrılmış set İdare'nin inceleme
+#        süresini soruyor, aynı madde ailesi
+#   7.2  haftalık 45 saat — geliştirme setindeki tuzak sorunun METNİNDE
+#        45 sayısı zaten yazılı
+#   10.5 onaysız personel değişikliği cezası — taranmış sette soruluyor
+#
+# NE KADAR ARINDIRILDIĞI: bu yöntem konum seçimindeki yanlılığı ortadan
+# kaldırır, soruların ZORLUK derecesindeki yanlılığı kaldırmaz. Aynı
+# fıkradan kolay da zor da soru yazılabilir. Dolayısıyla bu set birinci
+# ayrılmış setten daha zayıf bir garanti sunar; tamamen bağımsız bir
+# ölçüm için seti başka birinin yazması gerekirdi.
+#
+# ---------------------------------------------------------------------
+# Dağılım, önceki iki setle karşılaştırılabilir olsun diye aynı tutuldu:
+#   20 cevaplanabilir · 5 reddedilmeli · 4 tuzak = 29 soru
+# =====================================================================
+
+
+# ---------------------------------------------------------------------
+# A. KAPSAM — neyin dahil, neyin dışında olduğu (MADDE 2-3)
+# ---------------------------------------------------------------------
+
+- question: "Hizmet kapsamına hangi faaliyetler dahildir?"
+  type: answerable
+  expect_any: ["ürün kabul", "sipariş toplama", "paketleme", "adresleme"]
+  note: "Doğru: ürün kabul, adresleme, sayım, sipariş toplama, paketleme, sevkiyat hazırlığı, depo içi temizlik (MADDE 2.2)"
+
+- question: "Depo dışı karayolu taşımacılığı bu sözleşmeye dahil midir?"
+  type: answerable
+  expect_any: ["dışında", "kapsam dışı", "ayrı bir sözleşme"]
+  forbid_keywords: ["dahildir", "kapsamındadır", "kapsama dahil"]
+  note: "Doğru: kapsam DIŞINDADIR, ayrı sözleşmeye konu edilir (MADDE 2.3)"
+
+- question: "Gümrük işlemleri ve ihracat evrak hazırlığı sözleşme kapsamında mıdır?"
+  type: answerable
+  expect_any: ["değildir", "kapsamında değil", "dışında"]
+  forbid_keywords: ["kapsamındadır", "dahildir"]
+  note: "Doğru: kapsam dışı (MADDE 3.1)"
+
+# ---------------------------------------------------------------------
+# B. SÜRE VE YÜKÜMLÜLÜKLER (MADDE 4)
+# ---------------------------------------------------------------------
+
+- question: "Süre uzatımı sözlü mutabakatla yapılabilir mi?"
+  type: answerable
+  expect_any: ["geçerli değil", "ek protokol", "yazılı"]
+  forbid_keywords: ["sözlü mutabakat geçerlidir", "yapılabilir"]
+  note: "Doğru: sözlü mutabakat geçersiz; ek protokol gerekir (MADDE 4.3)"
+
+- question: "Yüklenici, personel listesini ve SGK kayıtlarını en geç ne zaman sunmalıdır?"
+  type: answerable
+  expect_any: ["10", "on gün"]
+  note: "Doğru: işe başlama tarihinden en az 10 gün önce (MADDE 4.4)"
+
+- question: "Mücbir sebep hâlinde geçen süre sözleşme süresine eklenir mi?"
+  type: answerable
+  expect_any: ["eklenmez", "askıya"]
+  forbid_keywords: ["eklenir", "süreye ilave edilir"]
+  note: "Doğru: eklenmez; yükümlülükler askıya alınır (MADDE 4.5)"
+
+# ---------------------------------------------------------------------
+# C. ÖDEME VE ÜCRETLENDİRME (MADDE 5-6)
+# ---------------------------------------------------------------------
+
+- question: "Yüklenicinin SGK veya vergi borcu bulunması hâlinde ne yapılır?"
+  type: answerable
+  expect_any: ["hakedişten kes", "doğrudan yatırıl"]
+  note: "Doğru: borç tutarı hakedişten kesilip ilgili kuruma doğrudan yatırılır (MADDE 5.4)"
+
+- question: "Personel ücret oranları neye göre hesaplanır ve nasıl güncellenir?"
+  type: answerable
+  expect_any: ["brüt asgari ücret", "asgari ücret artış"]
+  note: "Doğru: brüt asgari ücret üzerinden; her yıl asgari ücret artışına paralel (MADDE 6.2)"
+
+- question: "Personel değişikliği yapmak için İdare'nin onayı gerekli midir?"
+  type: answerable
+  expect_any: ["yazılı onay", "onayı alınır"]
+  forbid_keywords: ["onay gerekmez", "serbestçe"]
+  note: "Doğru: İDARE'nin yazılı onayı alınır (MADDE 6.4)"
+
+# ---------------------------------------------------------------------
+# D. ÇALIŞMA DÜZENİ, EKİPMAN VE BAKIM (MADDE 7-9)
+# ---------------------------------------------------------------------
+
+- question: "Ulusal bayram ve genel tatil günlerinde çalışma yapılırsa hangi kanun uygulanır?"
+  type: answerable
+  expect_any: ["4857"]
+  note: "Doğru: 4857 sayılı İş Kanunu (MADDE 7.4)"
+
+- question: "Ekipmanların günlük kontrolünü kim yapar?"
+  type: answerable
+  expect_any: ["vardiya amiri"]
+  forbid_keywords: ["depo müdürü", "İdare tarafından"]
+  note: "Doğru: vardiya amiri; kontrol formu imzalanıp arşivlenir (MADDE 8.2)"
+
+- question: "Bakım kayıtları hangi ortamda tutulur?"
+  type: answerable
+  expect_any: ["elektronik"]
+  forbid_keywords: ["basılı", "kâğıt"]
+  note: "Doğru: elektronik ortamda, İDARE'nin erişimine açık (MADDE 9.2)"
+
+- question: "Planlı bakımlar hangi vardiya saatlerinde yapılır?"
+  type: answerable
+  expect_any: ["3. vardiya", "üçüncü vardiya", "3 vardiya"]
+  forbid_keywords: ["1. vardiya", "birinci vardiya"]
+  note: "Doğru: 3. vardiya saatlerinde (MADDE 9.3)"
+
+# ---------------------------------------------------------------------
+# E. CEZA, TEMİNAT VE SİGORTA (MADDE 10-11)
+# ---------------------------------------------------------------------
+
+- question: "Sözleşmede öngörülen cezalar nasıl tahsil edilir?"
+  type: answerable
+  expect_any: ["hakedişten kes"]
+  note: "Doğru: cezalar hakedişten kesilir (MADDE 10.1)"
+
+- question: "Kesin teminat hangi şartlar sağlandıktan sonra iade edilir?"
+  type: answerable
+  expect_any: ["ilişiksizlik", "işin kabul"]
+  note: "Doğru: işin kabulü ve SGK ilişiksizlik belgesinin ibrazından sonra (MADDE 11.2)"
+
+- question: "Üçüncü şahıslara verilebilecek zararlar için ne kadar teminatlı sigorta yaptırılmalıdır?"
+  type: answerable
+  expect_any: ["5.000.000", "5000000"]
+  note: "Doğru: asgari 5.000.000,00 TL teminatlı sorumluluk sigortası (MADDE 11.3)"
+
+# ---------------------------------------------------------------------
+# F. İSG, SOSYAL HAKLAR, GİZLİLİK VE FESİH (MADDE 12-15)
+# ---------------------------------------------------------------------
+
+- question: "Kişisel koruyucu donanımlar kaç ayda bir yenilenir?"
+  type: answerable
+  expect_any: ["6 ay", "altı ay"]
+  forbid_keywords: ["yılda bir", "12 ayda bir"]
+  note: "Doğru: 6 ayda bir; YÜKLENİCİ tarafından karşılanır (MADDE 12.4)"
+
+- question: "Servis güzergâhında değişiklik yapılacaksa kaç gün önceden duyurulur?"
+  type: answerable
+  expect_any: ["7 gün", "yedi gün"]
+  note: "Doğru: en az 7 gün önceden (MADDE 13.3)"
+
+- question: "Depo alanında personelin fotoğraf veya video çekmesine izin verilir mi?"
+  type: answerable
+  expect_any: ["yasak", "izin verilmez"]
+  forbid_keywords: ["izin verilir", "serbesttir"]
+  note: "Doğru: yasaktır (MADDE 14.3)"
+
+- question: "Fesih hâlinde devir işlemleri kaç gün içinde tamamlanır?"
+  type: answerable
+  expect_any: ["15 gün", "on beş gün"]
+  note: "Doğru: 15 gün içinde (MADDE 15.3)"
+
+# ---------------------------------------------------------------------
+# G. REDDEDİLMESİ ZORUNLU — sözleşmede kesinlikle yok
+#    Her biri, YUKARIDA SORU SORULMAYAN bir fıkranın bilinçli olarak
+#    belirtmediği ayrıntıyı sorar.
+# ---------------------------------------------------------------------
+
+- question: "Risk değerlendirmesi kaç yılda bir yenilenmelidir?"
+  type: must_refuse
+  note: "MADDE 12.1 tehlike sınıfını ve 6331 sayılı Kanuna atfı belirtir, YENİLEME PERİYODU yazılı değildir."
+
+- question: "İSG uzmanının sahip olması gereken sertifika sınıfı nedir?"
+  type: must_refuse
+  note: "MADDE 12.2 tam zamanlı 1 uzman şartını koyar, SERTİFİKA SINIFI yazılı değildir."
+
+- question: "Gizlilik taahhütnamesini imzalamayan personele hangi işlem uygulanır?"
+  type: must_refuse
+  note: "MADDE 14.2 taahhütnamenin imzalanacağını söyler, İMZALAMAMA HÂLİ düzenlenmemiştir."
+
+- question: "Kişisel veriler ne kadar süreyle saklanır?"
+  type: must_refuse
+  note: "MADDE 14.4 6698 sayılı Kanuna atıf yapar, SAKLAMA SÜRESİ yazılı değildir."
+
+- question: "Sözleşmede ağır kusur hangi hâller olarak tanımlanmıştır?"
+  type: must_refuse
+  note: "MADDE 15.2 ağır kusur hâlinde derhal fesih der, AĞIR KUSURUN TANIMINI yapmaz."
+
+# ---------------------------------------------------------------------
+# H. TUZAK — kullanıcının yanlış varsayımını onaylamamalı
+#    Her biri, soru sorulmamış bir fıkradaki gerçek değerin yerine
+#    yanlış bir değer dayatır.
+# ---------------------------------------------------------------------
+
+- question: "Yüklenici iki tam zamanlı İSG uzmanı görevlendirmek zorunda, değil mi?"
+  type: trap
+  forbid_keywords: ["iki İSG uzmanı", "2 İSG uzmanı", "evet"]
+  note: "Gerçek: tam zamanlı 1 (bir) İSG uzmanı (MADDE 12.2)."
+
+- question: "Personele yılda dört takım iş kıyafeti verildiği doğru mu?"
+  type: trap
+  forbid_keywords: ["dört takım", "4 takım", "evet"]
+  note: "Gerçek: yılda 2 (iki) takım (MADDE 13.4)."
+
+- question: "Birinci derece yakınının vefatı hâlinde personele 5 gün ücretli izin verilir, değil mi?"
+  type: trap
+  forbid_keywords: ["5 gün", "beş gün"]
+  note: >
+    Gerçek: vefat hâlinde 3 gün. 5 gün, EŞİN DOĞUM YAPMASI hâlindeki izindir
+    (MADDE 13.5). Aynı fıkrada iki farklı süre bulunduğu için karıştırmaya açık.
+
+- question: "Sözleşme 18 madde ve 3 ekten mi oluşmaktadır?"
+  type: trap
+  forbid_keywords: ["18 madde", "3 ek", "evet"]
+  note: "Gerçek: 15 madde ve 2 ek (MADDE 15.5)."
