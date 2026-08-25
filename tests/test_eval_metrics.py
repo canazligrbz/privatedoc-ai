@@ -8,8 +8,45 @@ fazla katıysa olduğundan kötü görünür. İkisi de yanlış karar verdirir.
 from __future__ import annotations
 
 import pytest
-from matching import normalize, value_in
+from matching import forbidden_in, normalize, value_in
 from stats import fark_araligi, oran_ozeti, ortusuyor_mu, wilson_interval
+
+
+# =====================================================================
+#  YASAKLI İFADE EŞLEŞMESİ — olumsuzlama farkındalığı
+# =====================================================================
+#  ÖLÇÜLMÜŞ VAKA: ikinci ayrılmış set, 4. soru. Yasaklı ifade "yapılabilir",
+#  modelin yanıtı "…sözlü mutabakatla YAPILABİLİR DEĞİL…" idi. Cevap doğru
+#  olmasına rağmen alt dizi eşleşmesi tuzağa düşüldü sandı.
+#
+#  Bu, 13 Ağustos'ta düzeltilen ŞİŞME hatasının tersi: orada gevşek eşleşme
+#  yanlışı doğru sayıyordu, burada doğruyu yanlış sayıyor. Bu testler
+#  gevşetilirse ölçüm aleti yine iki yönlü hata yapmaya başlar.
+
+@pytest.mark.parametrize("yasak, cevap", [
+    # AYRI SÖZCÜKLE OLUMSUZLANMIŞ -> ihlal DEĞİL
+    ("yapılabilir", "süre uzatımı sözlü mutabakatla yapılabilir değil [k1]."),
+    ("yapılabilir", "bu işlem yapılabilir değildir [k1]."),
+    ("dahildir", "karayolu taşımacılığı kapsama dahildir değil [k1]."),
+])
+def test_ayri_sozcukle_olumsuzlanan_ihlal_sayilmaz(yasak, cevap):
+    assert forbidden_in(cevap, yasak) is False
+
+
+@pytest.mark.parametrize("yasak, cevap", [
+    # GERÇEKTEN İDDİA EDİLMİŞ -> ihlal
+    ("yapılabilir", "evet, süre uzatımı sözlü mutabakatla yapılabilir [k1]."),
+    ("24 aydır", "sözleşme süresi 24 aydır [k1]."),
+    ("dahildir", "karayolu taşımacılığı sözleşmeye dahildir [k1]."),
+])
+def test_gercek_ihlal_yakalanir(yasak, cevap):
+    assert forbidden_in(cevap, yasak) is True
+
+
+def test_olumsuzlama_kurali_sayisal_yasagi_gevsetmez():
+    """Sayısal yasaklarda rakam sınırı kuralı korunur."""
+    assert forbidden_in("ceza oranı %16'dır [k1].", "6") is False
+    assert forbidden_in("ceza oranı %6'dır [k1].", "6") is True
 
 
 # =====================================================================

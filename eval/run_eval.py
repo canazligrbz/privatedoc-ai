@@ -46,7 +46,7 @@ enforce_airgap(
 from src.rag_engine import RAGEngine  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from matching import normalize, value_in  # noqa: E402
+from matching import forbidden_in, normalize, value_in  # noqa: E402
 from stats import bicimle, oran_ozeti  # noqa: E402
 
 
@@ -146,8 +146,11 @@ def evaluate_case(engine: RAGEngine, case: Dict[str, Any]) -> Dict[str, Any]:
         out["passed"] = False
         out["issues"].append(f"beklenen kaynak atfı yok: '{exp_src}'")
 
+    # forbidden_in(), value_in()'den farklı olarak "yapılabilir değil" gibi
+    # ayrı sözcükle olumsuzlanmış eşleşmeleri ihlal saymaz; ölçülmüş bir
+    # yanlış alarmdan doğdu (bkz. eval/matching.py → forbidden_in).
     for kw in case.get("forbid_keywords", []) or []:
-        if value_in(answer_n, kw):
+        if forbidden_in(answer_n, kw):
             out["passed"] = False
             out["issues"].append(f"YASAKLI İFADE ÜRETİLDİ (tuzağa düştü): '{kw}'")
 
