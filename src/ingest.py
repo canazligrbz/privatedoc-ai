@@ -115,6 +115,30 @@ def detect_heading(text: str) -> Optional[str]:
 # bölmemek gerekir; orada cümle ortasından kesilir ve anlam bozulur.
 # Bu yüzden (b) yalnızca NOKTA + BOŞLUK sonrası geçerlidir — parantez içi
 # atıflar virgül veya parantezle geldiği için eşleşmez.
+#
+# DENENDİ VE GERİ ALINDI — SADE RAKAMLI MADDE KALIBI (madde E, YAPILACAKLAR.md)
+#
+# Üçüncü bir kalıp denendi: satır başı + 1-2 haneli sayı + BÜYÜK HARF
+# ("8 Mesai saatleri dışında…"), çünkü yukarıdaki iki kalıp yalnızca
+# "MADDE 8" ve "9.2" biçimlerini tanıyor ve sade rakamla numaralanan
+# yönetmelik/yönerge/kira sözleşmelerinde bölme hiç çalışmıyordu.
+#
+# Hedeflenen vaka DÜZELDİ: 31 maddelik personel yönetmeliği 13 yerine 31
+# parçaya bölündü, Q6 ("Mesai saatleri dışında...") artık doğru cevaplanıyor.
+# Ama ÖLÇÜM ikinci bir etki buldu — kalıp eklenince bir tuzak sorusu (Q19,
+# "Personel yıllık iznini istediği tarihte kullanabilir, değil mi?")
+# reddetmekten yanlış varsayımı ONAYLAMAYA döndü; bağlama giren parçaların
+# SIRASI değişmişti. Genel skor 17/20'de sabit kaldı (üç farklı soru
+# bozuldu) ama ret doğruluğu — bu projenin en sağlam metriği — 6/6'dan
+# 5/6'ya düştü. İzolasyon testiyle doğrulandı: yalnızca bu kalıp geri
+# alınınca Q19 tekrar geçti, başka hiçbir şey değişmeden.
+#
+# Durma kuralı buydu: "ret doğruluğu düşerse geri al." Düştü, geri alındı.
+# Kalıp KOD'A eklenmedi — bu yorum negatif bulgunun kaydıdır, tekrar
+# denenmemesi için. `split_articles(min_len=min_chars)` hizalaması (aşağıda)
+# ayrı bir değişikliktir ve ayrıca izole ölçüldü: tek başına tutuldu, ölçülen
+# hiçbir skoru değiştirmedi ama depo sözleşmesindeki dört maddeyi (3.2, 12.2,
+# 14.2, 15.3) sessiz kayıptan kurtardı.
 _ARTICLE_SPLIT_RE = re.compile(
     r"(?=(?:^[ \t]*|(?<=[.:]\s))"
     r"(?:MADDE\s+\d+|Madde\s+\d+|\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)"
@@ -198,7 +222,19 @@ def blocks_to_chunks(cfg: Config,
             # Önce madde sınırlarında böl, sonra hâlâ uzun kalanları
             # karakter bazlı bölücüye ver.
             if article_split:
-                segments = split_articles(block.text)
+                # BİRLEŞTİRME EŞİĞİ, DÜŞÜRME EŞİĞİYLE AYNI OLMALI.
+                # split_articles varsayılan olarak 60 karakterin altındaki
+                # parçaları öncekine yapıştırıyordu; ama aşağıdaki filtre
+                # min_chunk_chars (80) altındakileri ATIYOR. Arada kalan
+                # 60-80 karakterlik bir madde birleştirilmiyor, sonra
+                # sessizce siliniyordu.
+                #
+                # Sade rakamlı madde bölme eklenene kadar bu boşluk hiç
+                # tetiklenmedi (parçalar zaten iriydi). Tetiklendiğinde
+                # yönetmeliğin 30. maddesi ("hüküm bulunmayan hâllerde genel
+                # mevzuat uygulanır", 78 karakter) indekse hiç girmedi —
+                # hata da vermedi. Bu projedeki en tehlikeli hata biçimi.
+                segments = split_articles(block.text, min_len=min_chars)
             else:
                 segments = [block.text]
             pieces = []
