@@ -42,6 +42,9 @@ eval/tarama*.json
 
 # --- Kişisel çalışma notları (depoya girmez) ---
 YAPILACAKLAR.md
+# Asistan yönergesi: iç çalışma kuralları, ölçüm disiplini ve yaşanmış
+# hataların kaydı. Yerelde durur, yayımlanmaz.
+CLAUDE.md
 
 # --- Ortam / sırlar ---
 .env
